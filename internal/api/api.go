@@ -107,7 +107,17 @@ func (h *Handler) Top(w http.ResponseWriter, r *http.Request) {
 		entries = entries[:n]
 	}
 
-	resp := costsResponse{Cloud: summary.Cloud, Region: summary.Region, Entries: entries}
+	resp := costsResponse{
+		Cloud:   summary.Cloud,
+		Region:  summary.Region,
+		Entries: entries,
+		Totals: totals{
+			CrossAZGB:     summary.TotalCrossAZGB,
+			CrossAZUSD:    summary.TotalCrossAZCost,
+			SameAZGB:      summary.TotalSameAZGB,
+			PricePerGBUSD: summary.PricePerGB,
+		},
+	}
 	if !updatedAt.IsZero() {
 		resp.UpdatedAt = updatedAt.UTC().Format(time.RFC3339)
 	}

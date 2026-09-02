@@ -8,21 +8,83 @@ on:
 
 env:
   REGISTRY: ghcr.io
+  IMAGE_BASE: ghcr.io/${{ github.repository_owner }}
 
 jobs:
-  build-push:
+  # Builds each (component, arch) pair on a NATIVE runner for that arch instead of emulating
+  # arm64 via QEMU on an amd64 runner. QEMU-emulated Go builds of client-go's dependency tree
+  # were taking 14-16 minutes per image; native arm64 runners (GitHub-hosted, free for public
+  # repos) avoid the emulation tax entirely. Each leg pushes an arch-specific image by digest
+  # only (no tag yet); the `merge` job below combines the two digests into one multi-arch tag.
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [agent, collector]
+        include:
+          - arch: amd64
+            runs-on: ubuntu-latest
+          - arch: arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: cmd/${{ matrix.component }}/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=image,name=${{ env.IMAGE_BASE }}/zonetax-${{ matrix.component }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.component }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}-${{ matrix.arch }}
+
+      - name: Save digest for the merge job
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.component }}-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Combines the amd64 + arm64 digests from the build job into one multi-arch manifest per
+  # component, tagged with the real tags (latest/sha/semver) via docker buildx imagetools.
+  merge:
+    needs: build
+    strategy:
+      matrix:
+        component: [agent, collector]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-    strategy:
-      matrix:
-        component: [agent, collector]
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-${{ matrix.component }}-*
+          merge-multiple: true
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -38,20 +100,19 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/zonetax-${{ matrix.component }}
+          images: ${{ env.IMAGE_BASE }}/zonetax-${{ matrix.component }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=sha-,format=short
             type=semver,pattern={{version}}
 
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: cmd/${{ matrix.component }}/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.component }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+      - name: Create multi-arch manifest and push
+        working-directory: /tmp/digests
+        run: |
+          image="${{ env.IMAGE_BASE }}/zonetax-${{ matrix.component }}"
+          tags=$(echo '${{ steps.meta.outputs.json }}' | python3 -c "import json,sys; print(' '.join(f'-t {t}' for t in json.load(sys.stdin)['tags']))")
+          docker buildx imagetools create $tags \
+            $(for f in *; do echo "$image@sha256:$f"; done)
+
+      - name: Inspect result
+        run: docker buildx imagetools inspect ${{ env.IMAGE_BASE }}/zonetax-${{ matrix.component }}:latest
