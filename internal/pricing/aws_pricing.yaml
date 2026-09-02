@@ -1,0 +1,19 @@
+version: 1
+pricing:
+  aws:
+    # $/GB, applied per direction (i.e. a 1GB transfer between two AZs costs 2x this, since
+    # both the sender and receiver are billed). Source: AWS EC2 Data Transfer pricing.
+    # https://aws.amazon.com/ec2/pricing/on-demand/#Data_Transfer
+    default_cross_az_per_gb: 0.01
+    regions:
+      us-east-1:
+        cross_az_per_gb: 0.01
+      us-west-2:
+        cross_az_per_gb: 0.01
+      eu-west-1:
+        cross_az_per_gb: 0.01
+      ap-south-1:
+        cross_az_per_gb: 0.01
+    # Cross-region transfer is materially more expensive than cross-AZ; kept separate so future
+    # milestones can price inter-region traffic distinctly from intra-region cross-AZ traffic.
+    default_cross_region_per_gb: 0.02

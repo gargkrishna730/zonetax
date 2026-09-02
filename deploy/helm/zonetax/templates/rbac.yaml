@@ -1,0 +1,30 @@
+{{- if .Values.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "zonetax.serviceAccountName" . }}
+  labels:
+    {{- include "zonetax.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "zonetax.fullname" . }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "zonetax.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "zonetax.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ include "zonetax.fullname" . }}
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
