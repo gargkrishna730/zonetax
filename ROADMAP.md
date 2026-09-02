@@ -7,8 +7,9 @@ Scope: AWS/EKS first. Conntrack-based sampling for MVP (eBPF is a possible v2).
       exposes raw byte-count metrics (Prometheus format). Unit tested (conntrack parser, pod/node
       index incl. fake-clientset informer test, aggregator, metrics registration); accuracy
       validation against a real multi-AZ cluster is still pending — see "Known limitations" below.
-- [ ] **M2** — Cost engine: versioned AWS pricing table (YAML), collector aggregates AZ-pair bytes
-      into $ cost, REST API to query current/historical spend.
+- [x] **M2** — Cost engine: versioned AWS pricing table (YAML), collector aggregates AZ-pair bytes
+      into $ cost, REST API to query current/historical spend. Deployed and validated live against
+      solrn-dev — see "Known limitations" below.
 - [ ] **M3** — UI: live Sankey/chord diagram of $ flow between AZs + top-offenders table
       (namespace/workload breakdown). Static SPA, no build step, served by the collector.
 - [ ] **M4** — Alerting: Slack webhook on $/hour threshold breach.
