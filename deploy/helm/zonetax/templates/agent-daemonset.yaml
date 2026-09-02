@@ -18,11 +18,29 @@ spec:
     spec:
       serviceAccountName: {{ include "zonetax.serviceAccountName" . }}
       hostNetwork: true
+      tolerations:
+        - operator: Exists
+      {{- if .Values.agent.enableConntrackAcct }}
+      initContainers:
+        - name: enable-conntrack-acct
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - echo 1 > /proc/sys/net/netfilter/nf_conntrack_acct
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: host-proc
+              mountPath: /proc
+      {{- end }}
       containers:
         - name: agent
           image: "{{ .Values.agent.image.repository }}:{{ .Values.agent.image.tag }}"
           imagePullPolicy: {{ .Values.agent.image.pullPolicy }}
           securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
             capabilities:
               add: ["NET_ADMIN"]
           env:

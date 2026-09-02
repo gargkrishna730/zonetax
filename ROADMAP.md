@@ -18,17 +18,26 @@ Scope: AWS/EKS first. Conntrack-based sampling for MVP (eBPF is a possible v2).
 
 ## Known limitations (post-M1)
 
-- **Not yet validated against a live multi-AZ cluster.** All M1 logic is unit tested against fake
-  data (conntrack fixtures, fake k8s clientset) but hasn't been run against a real EKS cluster's
-  `/proc/net/nf_conntrack` yet. Byte counts depend on `net.netfilter.nf_conntrack_acct=1` being
-  set on nodes — most default AMIs do NOT enable this, so real-world validation may surface a need
-  to set that sysctl via a DaemonSet init container or node bootstrap config.
-- **hostNetwork required.** The agent runs with `hostNetwork: true` to see the node's real
-  conntrack table, which has security review implications for locked-down clusters.
+- **Validated against a live multi-AZ cluster (solrn-dev, 2026-09-02).** Deployed via Helm to a
+  real 3-AZ EKS cluster; confirmed real cross-AZ byte counts attributed correctly to actual
+  workloads (e.g. `solrn-aura-backend-api-dev` us-east-1c -> us-east-1a). Two real issues were
+  found and fixed during validation, both now baked into the Helm chart:
+  1. `net.netfilter.nf_conntrack_acct` was disabled by default on nodes (EKS AL2023), so byte
+     counts came back as 0 — fixed with a privileged init container that sets the sysctl
+     (`agent.enableConntrackAcct`, default true).
+  2. The distroless nonroot container couldn't read `/proc/net/nf_conntrack` even with
+     NET_ADMIN — fixed by running the agent container as `runAsUser: 0`.
+- **hostNetwork + privileged init container required.** The agent runs with `hostNetwork: true`
+  and (by default) a privileged init container to flip the conntrack-accounting sysctl — real
+  security review implications for locked-down/prod clusters. Fine for dev/test; revisit before
+  recommending this for production without review.
 - **ReplicaSet→Deployment name resolution is a heuristic** (strips the pod-template-hash suffix),
   not an API lookup — unusual naming conventions could produce a wrong workload label.
 - **Same-node pod-to-pod traffic isn't distinguished from same-AZ cross-node traffic** yet; both
   land in the same `same_az_bytes_total` bucket.
+- **DaemonSet doesn't tolerate node resource pressure well** — on a memory-constrained node in
+  testing, the agent pod stayed Pending indefinitely (expected; not a bug, but worth noting for
+  resource-tight clusters).
 
 ## Non-goals (for now)
 

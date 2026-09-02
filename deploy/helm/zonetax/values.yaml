@@ -1,9 +1,15 @@
 agent:
   image:
     repository: ghcr.io/gargkrishna730/zonetax-agent
-    tag: "0.1.0"
-    pullPolicy: IfNotPresent
+    tag: "latest"
+    pullPolicy: Always
   sampleIntervalSeconds: 15
+  # Enables byte-count accounting in the kernel's conntrack table via a privileged init
+  # container that sets net.netfilter.nf_conntrack_acct=1 on the node. Required for non-zero
+  # cross-AZ byte metrics — most default node images (e.g. EKS AL2023) ship with this disabled.
+  # Disable if your nodes already have this sysctl set via a different mechanism (e.g. node
+  # bootstrap config), or if the privileged init container isn't acceptable in your environment.
+  enableConntrackAcct: true
   resources:
     requests:
       cpu: 50m
@@ -15,8 +21,8 @@ agent:
 collector:
   image:
     repository: ghcr.io/gargkrishna730/zonetax-collector
-    tag: "0.1.0"
-    pullPolicy: IfNotPresent
+    tag: "latest"
+    pullPolicy: Always
   replicas: 1
   service:
     type: ClusterIP
