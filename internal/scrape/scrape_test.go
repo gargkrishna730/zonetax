@@ -2,7 +2,10 @@ package scrape
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -58,4 +61,62 @@ func TestTarget_URL(t *testing.T) {
 	if got := tgt.URL(); got != want {
 		t.Errorf("URL() = %q, want %q", got, want)
 	}
+}
+
+// TestScrapeAll_ParsesRealPrometheusTextFormat is a regression test for a real bug found
+// deploying to solrn-dev: prometheus/common v0.71+ requires model.NameValidationScheme to be
+// set globally before expfmt.TextParser can be used, or TextToMetricFamilies panics. Unit tests
+// that only construct dto.MetricFamily structs by hand (as costengine's tests do) never
+// exercise that code path — this test hits a real HTTP server serving real Prometheus text
+// format, the same way the collector scrapes real agents, so it would have caught this.
+func TestScrapeAll_ParsesRealPrometheusTextFormat(t *testing.T) {
+	body := `# HELP zonetax_agent_cross_az_bytes_total test
+# TYPE zonetax_agent_cross_az_bytes_total counter
+zonetax_agent_cross_az_bytes_total{dst_zone="us-east-1a",src_namespace="prod",src_workload="web",src_zone="us-east-1b"} 1234
+`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	host := srv.Listener.Addr().String() // e.g. "127.0.0.1:54321"
+	target := Target{PodName: "agent-test", IP: hostOnly(host), Port: portOnly(host)}
+
+	results := ScrapeAll(context.Background(), []Target{target}, 5*time.Second)
+	if len(results) != 1 {
+		t.Fatalf("results = %d, want 1", len(results))
+	}
+	if results[0].Err != nil {
+		t.Fatalf("scrape error = %v, want nil", results[0].Err)
+	}
+	mf, ok := results[0].Metrics["zonetax_agent_cross_az_bytes_total"]
+	if !ok || len(mf.Metric) != 1 {
+		t.Fatalf("Metrics = %+v, want one zonetax_agent_cross_az_bytes_total sample", results[0].Metrics)
+	}
+	if got := mf.Metric[0].GetCounter().GetValue(); got != 1234 {
+		t.Errorf("counter value = %v, want 1234", got)
+	}
+}
+
+func hostOnly(hostport string) string {
+	for i := len(hostport) - 1; i >= 0; i-- {
+		if hostport[i] == ':' {
+			return hostport[:i]
+		}
+	}
+	return hostport
+}
+
+func portOnly(hostport string) int32 {
+	for i := len(hostport) - 1; i >= 0; i-- {
+		if hostport[i] == ':' {
+			var port int32
+			for _, c := range hostport[i+1:] {
+				port = port*10 + int32(c-'0')
+			}
+			return port
+		}
+	}
+	return 0
 }

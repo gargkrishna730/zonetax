@@ -12,6 +12,7 @@ import (
 
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
+	"github.com/prometheus/common/model"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -115,7 +116,11 @@ func scrapeOne(ctx context.Context, client *http.Client, t Target) (map[string]*
 		return nil, fmt.Errorf("scrape %s: HTTP %d: %s", t.PodName, resp.StatusCode, body)
 	}
 
-	var parser expfmt.TextParser
+	var parser = expfmt.NewTextParser(model.LegacyValidation)
+	// prometheus/common >=0.71: expfmt.TextParser{} (zero value) has an unset
+	// ValidationScheme and panics on first parse — must use NewTextParser(). LegacyValidation
+	// matches the metric names our own agent emits (see internal/metrics) and every
+	// pre-UTF8-metric-names Prometheus exposition format, which is what our agent produces.
 	mf, err := parser.TextToMetricFamilies(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("scrape %s: parse metrics: %w", t.PodName, err)
