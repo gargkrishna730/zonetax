@@ -21,6 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         component: [agent, collector]
+        arch: [amd64, arm64]
         include:
           - arch: amd64
             runs-on: ubuntu-latest
