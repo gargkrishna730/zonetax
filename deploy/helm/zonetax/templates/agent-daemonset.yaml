@@ -30,8 +30,18 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            - name: SAMPLE_INTERVAL_SECONDS
+              value: {{ .Values.agent.sampleIntervalSeconds | quote }}
           ports:
             - containerPort: 9090
               name: metrics
+          volumeMounts:
+            - name: host-proc
+              mountPath: /proc
+              readOnly: true
           resources:
             {{- toYaml .Values.agent.resources | nindent 12 }}
+      volumes:
+        - name: host-proc
+          hostPath:
+            path: /proc

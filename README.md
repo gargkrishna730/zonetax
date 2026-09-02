@@ -72,7 +72,7 @@ helm install zonetax zonetax/zonetax -n zonetax --create-namespace
 
 ## Development
 
-Requires Go 1.22+.
+Requires Go 1.25+.
 
 ```bash
 git clone https://github.com/gargkrishna730/zonetax.git

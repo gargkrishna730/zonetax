@@ -3,6 +3,7 @@ agent:
     repository: ghcr.io/gargkrishna730/zonetax-agent
     tag: "0.1.0"
     pullPolicy: IfNotPresent
+  sampleIntervalSeconds: 15
   resources:
     requests:
       cpu: 50m
