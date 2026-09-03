@@ -14,6 +14,16 @@ const (
 	crossAZMetricName = "zonetax_agent_cross_az_bytes_total"
 	sameAZMetricName  = "zonetax_agent_same_az_bytes_total"
 	bytesPerGB        = 1e9
+
+	// crossAZBillingMultiplier accounts for how AWS actually bills cross-AZ transfer: the
+	// pricing table stores AWS's published PER-DIRECTION rate (e.g. $0.01/GB for us-east-1,
+	// matching aws.amazon.com/ec2/pricing/on-demand/#Data_Transfer), but a single GB that
+	// crosses an AZ boundary is billed TWICE — once as egress from the sender's AZ, once as
+	// ingress to the receiver's AZ — for a real total of $0.02/GB. Our agent only observes
+	// and reports bytes from the source side of each connection (see internal/aggregator), so
+	// without this multiplier we'd silently under-report the real AWS bill by exactly 2x.
+	// See: https://www.lastweekinaws.com/blog/aws-cross-az-data-transfer-costs-more-than-aws-says/
+	crossAZBillingMultiplier = 2
 )
 
 // Entry is one costed cross-AZ traffic bucket: bytes observed between two zones, attributed to
@@ -31,13 +41,18 @@ type Entry struct {
 // Summary is the full costed picture for one collection cycle: cross-AZ entries plus aggregate
 // totals, including how much same-AZ (non-billable) traffic exists for context.
 type Summary struct {
-	Cloud            string  `json:"cloud"`
-	Region           string  `json:"region"`
-	PricePerGB       float64 `json:"price_per_gb_usd"`
-	Entries          []Entry `json:"entries"`
-	TotalCrossAZGB   float64 `json:"total_cross_az_gb"`
-	TotalCrossAZCost float64 `json:"total_cross_az_cost_usd"`
-	TotalSameAZGB    float64 `json:"total_same_az_gb"`
+	Cloud  string `json:"cloud"`
+	Region string `json:"region"`
+	// PricePerGBDirection is the raw AWS-published per-direction rate from the pricing table
+	// (e.g. $0.01/GB). EffectivePricePerGB is what a GB of *observed* (one-directional) traffic
+	// actually costs once billed twice — see crossAZBillingMultiplier — and is what CostUSD on
+	// each Entry and TotalCrossAZCost are computed from.
+	PricePerGBDirection float64 `json:"price_per_gb_direction_usd"`
+	EffectivePricePerGB float64 `json:"effective_price_per_gb_usd"`
+	Entries             []Entry `json:"entries"`
+	TotalCrossAZGB      float64 `json:"total_cross_az_gb"`
+	TotalCrossAZCost    float64 `json:"total_cross_az_cost_usd"`
+	TotalSameAZGB       float64 `json:"total_same_az_gb"`
 }
 
 // Compute sums the given cross-AZ and same-AZ metric families (typically merged from multiple
@@ -46,19 +61,25 @@ type Summary struct {
 // started (Prometheus counter semantics), not a rate — see docs/architecture.md for why the
 // agent intentionally exposes raw cumulative counters rather than computing its own deltas.
 func Compute(families map[string]*dto.MetricFamily, table *pricing.Table, cloud, region string) (Summary, error) {
-	pricePerGB, err := table.CrossAZPerGB(cloud, region)
+	pricePerGBDirection, err := table.CrossAZPerGB(cloud, region)
 	if err != nil {
 		return Summary{}, err
 	}
+	effectivePricePerGB := pricePerGBDirection * crossAZBillingMultiplier
 
-	summary := Summary{Cloud: cloud, Region: region, PricePerGB: pricePerGB}
+	summary := Summary{
+		Cloud:               cloud,
+		Region:              region,
+		PricePerGBDirection: pricePerGBDirection,
+		EffectivePricePerGB: effectivePricePerGB,
+	}
 
 	if mf, ok := families[crossAZMetricName]; ok {
 		for _, m := range mf.GetMetric() {
 			labels := labelMap(m.GetLabel())
 			bytes := m.GetCounter().GetValue()
 			gb := bytes / bytesPerGB
-			cost := gb * pricePerGB
+			cost := gb * effectivePricePerGB
 
 			summary.Entries = append(summary.Entries, Entry{
 				SrcZone:      labels["src_zone"],

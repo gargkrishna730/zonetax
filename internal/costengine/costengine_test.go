@@ -56,11 +56,11 @@ func TestCompute_PricesCrossAZTraffic(t *testing.T) {
 	if !almostEqual(e.GB, 1.0) {
 		t.Errorf("GB = %v, want 1.0", e.GB)
 	}
-	if !almostEqual(e.CostUSD, 0.01) { // 1GB * $0.01/GB
-		t.Errorf("CostUSD = %v, want 0.01", e.CostUSD)
+	if !almostEqual(e.CostUSD, 0.02) { // 1GB observed * $0.01/GB direction * 2x billing = $0.02
+		t.Errorf("CostUSD = %v, want 0.02", e.CostUSD)
 	}
-	if !almostEqual(summary.TotalCrossAZCost, 0.01) {
-		t.Errorf("TotalCrossAZCost = %v, want 0.01", summary.TotalCrossAZCost)
+	if !almostEqual(summary.TotalCrossAZCost, 0.02) {
+		t.Errorf("TotalCrossAZCost = %v, want 0.02", summary.TotalCrossAZCost)
 	}
 	if e.SrcWorkload != "web" || e.SrcNamespace != "prod" {
 		t.Errorf("attribution = %s/%s, want prod/web", e.SrcNamespace, e.SrcWorkload)
@@ -73,8 +73,8 @@ func TestCompute_UnknownRegionFallsBackToDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compute() error = %v", err)
 	}
-	if !almostEqual(summary.PricePerGB, 0.01) {
-		t.Errorf("PricePerGB = %v, want 0.01 (default)", summary.PricePerGB)
+	if !almostEqual(summary.EffectivePricePerGB, 0.02) {
+		t.Errorf("EffectivePricePerGB = %v, want 0.02 (default)", summary.EffectivePricePerGB)
 	}
 }
 

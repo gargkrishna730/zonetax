@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gargkrishna730/zonetax/internal/collector"
+	"github.com/gargkrishna730/zonetax/internal/costengine"
 )
 
 // Handler serves the collector's REST API, reading from a *collector.Store.
@@ -20,7 +21,7 @@ func NewHandler(store *collector.Store) *Handler {
 	return &Handler{store: store}
 }
 
-// costsResponse is the wire format for GET /api/v1/costs.
+// costsResponse is the wire format for GET /api/v1/costs and GET /api/v1/top.
 type costsResponse struct {
 	UpdatedAt string  `json:"updated_at,omitempty"`
 	StaleErr  string  `json:"stale_error,omitempty"`
@@ -40,27 +41,31 @@ type entry struct {
 }
 
 type totals struct {
-	CrossAZGB     float64 `json:"cross_az_gb"`
-	CrossAZUSD    float64 `json:"cross_az_cost_usd"`
-	SameAZGB      float64 `json:"same_az_gb"`
-	PricePerGBUSD float64 `json:"price_per_gb_usd"`
+	CrossAZGB  float64 `json:"cross_az_gb"`
+	CrossAZUSD float64 `json:"cross_az_cost_usd"`
+	SameAZGB   float64 `json:"same_az_gb"`
+	// PricePerGBUSD is the EFFECTIVE $/GB applied to CrossAZUSD — i.e. already includes AWS's
+	// bill-both-directions behavior (see costengine.crossAZBillingMultiplier), so
+	// CrossAZGB * PricePerGBUSD == CrossAZUSD. PricePerGBDirectionUSD is the raw published
+	// per-direction rate, included so the UI/CLI can show "why" without recomputing it.
+	PricePerGBUSD          float64 `json:"price_per_gb_usd"`
+	PricePerGBDirectionUSD float64 `json:"price_per_gb_direction_usd"`
 }
 
-// Costs handles GET /api/v1/costs, returning the most recently computed cost summary. Responds
-// 200 with the latest known-good summary even if the most recent collection cycle errored
-// (StaleErr is populated in that case) — a transient scrape failure shouldn't make callers treat
-// otherwise-valid recent data as unavailable.
-func (h *Handler) Costs(w http.ResponseWriter, r *http.Request) {
-	summary, updatedAt, lastErr := h.store.Latest()
-
+// buildResponse converts a costengine.Summary (+ Store metadata) into the wire response shared
+// by Costs and Top, so the two handlers can't drift out of sync on which fields get populated —
+// exactly the kind of duplication that caused Top to previously ship without Totals set.
+func buildResponse(summary costengine.Summary, updatedAt time.Time, lastErr error, entries []entry) costsResponse {
 	resp := costsResponse{
-		Cloud:  summary.Cloud,
-		Region: summary.Region,
+		Cloud:   summary.Cloud,
+		Region:  summary.Region,
+		Entries: entries,
 		Totals: totals{
-			CrossAZGB:     summary.TotalCrossAZGB,
-			CrossAZUSD:    summary.TotalCrossAZCost,
-			SameAZGB:      summary.TotalSameAZGB,
-			PricePerGBUSD: summary.PricePerGB,
+			CrossAZGB:              summary.TotalCrossAZGB,
+			CrossAZUSD:             summary.TotalCrossAZCost,
+			SameAZGB:               summary.TotalSameAZGB,
+			PricePerGBUSD:          summary.EffectivePricePerGB,
+			PricePerGBDirectionUSD: summary.PricePerGBDirection,
 		},
 	}
 	if !updatedAt.IsZero() {
@@ -69,21 +74,37 @@ func (h *Handler) Costs(w http.ResponseWriter, r *http.Request) {
 	if lastErr != nil {
 		resp.StaleErr = lastErr.Error()
 	}
-	for _, e := range summary.Entries {
-		resp.Entries = append(resp.Entries, entry{
+	return resp
+}
+
+func toEntries(src []costengine.Entry) []entry {
+	out := make([]entry, 0, len(src))
+	for _, e := range src {
+		out = append(out, entry{
 			SrcZone: e.SrcZone, DstZone: e.DstZone,
 			SrcNamespace: e.SrcNamespace, SrcWorkload: e.SrcWorkload,
 			GB: e.GB, CostUSD: e.CostUSD,
 		})
 	}
+	return out
+}
+
+// Costs handles GET /api/v1/costs, returning the most recently computed cost summary with all
+// entries (unsorted, unfiltered). Responds 200 with the latest known-good summary even if the
+// most recent collection cycle errored (StaleErr is populated in that case) — a transient scrape
+// failure shouldn't make callers treat otherwise-valid recent data as unavailable.
+func (h *Handler) Costs(w http.ResponseWriter, r *http.Request) {
+	summary, updatedAt, lastErr := h.store.Latest()
+	resp := buildResponse(summary, updatedAt, lastErr, toEntries(summary.Entries))
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }
 
 // Top handles GET /api/v1/top, returning cross-AZ entries sorted by cost descending, optionally
-// limited via ?n=. Kept as a separate endpoint (rather than a query param on Costs) since it's
-// the primary shape the CLI's `zonetax top` (M5) and the UI's offenders table (M3) both want.
+// limited via ?n= (default 10). Kept as a separate endpoint (rather than a query param on Costs)
+// since it's the primary shape the CLI's `zonetax top` (M5) and the UI's offenders table (M3)
+// both want.
 func (h *Handler) Top(w http.ResponseWriter, r *http.Request) {
 	summary, updatedAt, lastErr := h.store.Latest()
 
@@ -94,36 +115,13 @@ func (h *Handler) Top(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	entries := make([]entry, 0, len(summary.Entries))
-	for _, e := range summary.Entries {
-		entries = append(entries, entry{
-			SrcZone: e.SrcZone, DstZone: e.DstZone,
-			SrcNamespace: e.SrcNamespace, SrcWorkload: e.SrcWorkload,
-			GB: e.GB, CostUSD: e.CostUSD,
-		})
-	}
+	entries := toEntries(summary.Entries)
 	sortByCostDesc(entries)
 	if n < len(entries) {
 		entries = entries[:n]
 	}
 
-	resp := costsResponse{
-		Cloud:   summary.Cloud,
-		Region:  summary.Region,
-		Entries: entries,
-		Totals: totals{
-			CrossAZGB:     summary.TotalCrossAZGB,
-			CrossAZUSD:    summary.TotalCrossAZCost,
-			SameAZGB:      summary.TotalSameAZGB,
-			PricePerGBUSD: summary.PricePerGB,
-		},
-	}
-	if !updatedAt.IsZero() {
-		resp.UpdatedAt = updatedAt.UTC().Format(time.RFC3339)
-	}
-	if lastErr != nil {
-		resp.StaleErr = lastErr.Error()
-	}
+	resp := buildResponse(summary, updatedAt, lastErr, entries)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)

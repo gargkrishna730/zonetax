@@ -12,7 +12,15 @@ Scope: AWS/EKS first. Conntrack-based sampling for MVP (eBPF is a possible v2).
       solrn-dev — see "Known limitations" below.
 - [x] **M3** — UI: live Sankey/chord diagram of $ flow between AZs + top-offenders table
       (namespace/workload breakdown). Static SPA (D3.js from CDN, no build step), served by the
-      collector via Go embed.FS at "/", polling /api/v1/costs + /api/v1/top every 10s.
+      collector via Go embed.FS at "/", polling /api/v1/costs + /api/v1/top every 10s. Two real
+      bugs found by the user reviewing the live dashboard and fixed same-day: (1) cost math only
+      counted AWS's per-direction rate, undercounting real AWS bills by 2x since cross-AZ GB is
+      billed at both ends; (2) the zone-only Sankey graph crashed ("circular link") on
+      bidirectional zone traffic, a common case, and that one uncaught exception silently blanked
+      the whole page including the offenders table. Fixed by switching to a workload -> src-zone
+      -> dst-zone 3-column DAG (structurally acyclic) — which also doubles as the "service map"
+      view (which workload drives which flow) the user asked for — plus isolating each UI section
+      in its own try/catch so one render failure can't take down the rest of the page.
 - [ ] **M4** — Alerting: Slack webhook on $/hour threshold breach.
 - [ ] **M5** — CLI (`zonetax top`, `zonetax report --since 1h`) hitting the collector API.
 - [ ] **M6** — Polish: multi-arch CI images, demo GIF against a real multi-AZ EKS cluster,

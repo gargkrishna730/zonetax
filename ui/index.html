@@ -204,7 +204,7 @@
     <div class="kpi">
       <div class="label">Cross-AZ traffic</div>
       <div class="value" id="kpi-gb">0 GB</div>
-      <div class="sub">billable, crossing zone boundaries</div>
+      <div class="sub" id="kpi-gb-sub">billable, crossing zone boundaries</div>
     </div>
     <div class="kpi">
       <div class="label">Same-AZ traffic</div>
@@ -219,7 +219,7 @@
   </div>
 
   <div class="card">
-    <h2>Cost flow between zones</h2>
+    <h2>Service flow map — workload → source zone → destination zone</h2>
     <div id="sankey-wrap"><svg id="sankey"></svg></div>
     <div class="empty" id="sankey-empty" style="display:none;">No cross-AZ traffic observed yet.</div>
   </div>
@@ -284,12 +284,15 @@ function renderKPIs(costs) {
     (costs.cloud || '—') + ' · ' + (costs.region || '—');
   document.getElementById('kpi-cost').textContent = fmtUSD(costs.totals.cross_az_cost_usd);
   document.getElementById('kpi-gb').textContent = fmtGB(costs.totals.cross_az_gb);
-  document.getElementById('kpi-same-gb').textContent = fmtGB(costs.totals.same_az_gb);
-  document.getElementById('kpi-price').textContent = fmtUSD(costs.totals.price_per_gb_usd) + '/GB';
-
   const total = costs.totals.cross_az_gb + costs.totals.same_az_gb;
   const pct = total > 0 ? ((costs.totals.cross_az_gb / total) * 100).toFixed(1) : '0';
-  document.getElementById('kpi-price-sub').textContent = pct + '% of traffic is cross-AZ';
+  document.getElementById('kpi-gb-sub').textContent = pct + '% of all traffic is cross-AZ';
+  document.getElementById('kpi-same-gb').textContent = fmtGB(costs.totals.same_az_gb);
+  document.getElementById('kpi-price').textContent = fmtUSD(costs.totals.price_per_gb_usd) + '/GB';
+  const priceSub = costs.totals.price_per_gb_direction_usd
+    ? `$${costs.totals.price_per_gb_direction_usd.toFixed(3)}/GB each direction, billed twice`
+    : '—';
+  document.getElementById('kpi-price-sub').textContent = priceSub;
 
   const updatedEl = document.getElementById('last-updated');
   if (costs.stale_error) {
@@ -315,32 +318,72 @@ function renderSankey(entries) {
   svgEl.style.display = 'block';
   emptyEl.style.display = 'none';
 
-  const width = Math.max(560, wrap.clientWidth - 4);
-  const height = 320;
-  svg.attr('width', width).attr('height', height);
+  // Three-column DAG: workload -> source zone -> destination zone. This is structurally
+  // guaranteed acyclic (a node in column N can only link to column N+1), unlike a flat
+  // zone-to-zone graph where bidirectional traffic (us-east-1a<->us-east-1b both present, very
+  // common) creates a cycle that makes d3-sankey throw "Error: circular link" and abort the
+  // whole render. The workload column also IS the service map: which workload's traffic is
+  // driving which zone-to-zone flow, not just an anonymous zone pair.
+  const workloadNodeId = e => 'w:' + (e.src_workload || '(unknown)') + '|' + (e.src_namespace || '');
+  const srcZoneNodeId = e => 's:' + e.src_zone;
+  const dstZoneNodeId = e => 'd:' + e.dst_zone;
 
-  // Aggregate by src_zone -> dst_zone (Sankey nodes are zones; per-workload detail lives in
-  // the table below rather than cluttering the diagram with dozens of thin flows).
-  const flowMap = new Map();
+  const nodeMeta = new Map(); // id -> { id, label, column }
+  const addNode = (id, label, column) => {
+    if (!nodeMeta.has(id)) nodeMeta.set(id, { id, label, column });
+  };
+  const linkTotals = new Map(); // "srcId>dstId" -> cost
+
   for (const e of withCost) {
-    const key = e.src_zone + '→' + e.dst_zone;
-    flowMap.set(key, (flowMap.get(key) || 0) + e.cost_usd);
+    const wId = workloadNodeId(e), sId = srcZoneNodeId(e), dId = dstZoneNodeId(e);
+    addNode(wId, e.src_workload || '(unknown)', 0);
+    addNode(sId, e.src_zone, 1);
+    addNode(dId, e.dst_zone, 2);
+
+    const wsKey = wId + '>' + sId;
+    linkTotals.set(wsKey, (linkTotals.get(wsKey) || 0) + e.cost_usd);
+    const sdKey = sId + '>' + dId;
+    linkTotals.set(sdKey, (linkTotals.get(sdKey) || 0) + e.cost_usd);
   }
 
-  const zoneNames = Array.from(new Set(withCost.flatMap(e => [e.src_zone, e.dst_zone])));
-  const nodeIndex = new Map(zoneNames.map((z, i) => [z, i]));
-  const nodes = zoneNames.map(z => ({ name: z }));
-  const links = Array.from(flowMap.entries()).map(([key, value]) => {
-    const [src, dst] = key.split('→');
-    return { source: nodeIndex.get(src), target: nodeIndex.get(dst), value, srcZone: src, dstZone: dst };
+  const idList = Array.from(nodeMeta.keys());
+  const idIndex = new Map(idList.map((id, i) => [id, i]));
+  const nodes = idList.map(id => nodeMeta.get(id));
+  const links = Array.from(linkTotals.entries()).map(([key, value]) => {
+    const [srcId, dstId] = key.split('>');
+    return { source: idIndex.get(srcId), target: idIndex.get(dstId), value, srcId, dstId };
   });
 
+  const width = Math.max(640, wrap.clientWidth - 4);
+  const workloadCount = nodes.filter(n => n.column === 0).length;
+  const height = Math.max(280, Math.min(560, workloadCount * 32 + 80));
+  svg.attr('width', width).attr('height', height);
+
   const sankey = d3.sankey()
-    .nodeWidth(16)
-    .nodePadding(24)
+    .nodeId(d => d.index)
+    .nodeWidth(14)
+    .nodePadding(16)
     .extent([[1, 6], [width - 1, height - 6]]);
 
-  const graph = sankey({ nodes: nodes.map(d => Object.assign({}, d)), links: links.map(d => Object.assign({}, d)) });
+  let graph;
+  try {
+    graph = sankey({
+      nodes: nodes.map((d, i) => Object.assign({ index: i }, d)),
+      links: links.map(d => Object.assign({}, d)),
+    });
+  } catch (err) {
+    // Belt-and-suspenders: even the 3-column DAG could in principle hit a d3-sankey edge case
+    // we haven't foreseen (e.g. a workload that is simultaneously its own source and dest zone
+    // in a degenerate single-zone cluster). Fail into the empty state rather than crashing the
+    // whole refresh() and taking the top-offenders table down with it.
+    console.error('sankey layout failed:', err);
+    svgEl.style.display = 'none';
+    emptyEl.textContent = 'Flow diagram unavailable (' + err.message + ') — see the table below.';
+    emptyEl.style.display = 'block';
+    return;
+  }
+
+  const colorFor = d => d.column === 1 ? zoneColor(d.label) : d.column === 2 ? zoneColor(d.label) : '#5b6478';
 
   svg.append('g')
     .selectAll('path')
@@ -348,10 +391,10 @@ function renderSankey(entries) {
     .join('path')
     .attr('class', 'link')
     .attr('d', d3.sankeyLinkHorizontal())
-    .attr('stroke', d => zoneColor(d.srcZone))
+    .attr('stroke', d => colorFor(d.source))
     .attr('stroke-width', d => Math.max(1.5, d.width))
     .append('title')
-    .text(d => `${d.srcZone} → ${d.dstZone}\n${fmtUSD(d.value)}`);
+    .text(d => `${d.source.label} → ${d.target.label}\n${fmtUSD(d.value)}`);
 
   const node = svg.append('g')
     .selectAll('g')
@@ -361,18 +404,18 @@ function renderSankey(entries) {
   node.append('rect')
     .attr('x', d => d.x0)
     .attr('y', d => d.y0)
-    .attr('height', d => d.y1 - d.y0)
+    .attr('height', d => Math.max(1, d.y1 - d.y0))
     .attr('width', d => d.x1 - d.x0)
-    .attr('fill', d => zoneColor(d.name))
+    .attr('fill', colorFor)
     .append('title')
-    .text(d => d.name);
+    .text(d => d.label);
 
   node.append('text')
-    .attr('x', d => d.x0 < width / 2 ? d.x1 + 8 : d.x0 - 8)
+    .attr('x', d => d.column === 0 ? d.x1 + 8 : d.column === 2 ? d.x0 - 8 : (d.x0 + d.x1) / 2)
     .attr('y', d => (d.y0 + d.y1) / 2)
     .attr('dy', '0.35em')
-    .attr('text-anchor', d => d.x0 < width / 2 ? 'start' : 'end')
-    .text(d => d.name);
+    .attr('text-anchor', d => d.column === 0 ? 'start' : d.column === 2 ? 'end' : 'middle')
+    .text(d => d.label.length > 22 ? d.label.slice(0, 21) + '…' : d.label);
 }
 
 function renderTopTable(top) {
@@ -412,9 +455,21 @@ async function refresh() {
       fetchJSON('/api/v1/costs'),
       fetchJSON('/api/v1/top?n=15'),
     ]);
-    renderKPIs(costs);
-    renderSankey(costs.entries);
-    renderTopTable(top);
+
+    // Each render is isolated: a bug in one section (e.g. a d3-sankey edge case) must not take
+    // down the others. This is a lesson from a real bug — the Sankey diagram used to throw on
+    // bidirectional zone traffic (a legitimate, common case) and that single uncaught exception
+    // silently blanked the KPI cards and offenders table too, since they all lived in one
+    // try/catch. Each section now fails independently and visibly.
+    try { renderKPIs(costs); } catch (err) { console.error('renderKPIs failed:', err); }
+    try { renderSankey(costs.entries); } catch (err) {
+      console.error('renderSankey failed:', err);
+      document.getElementById('sankey').style.display = 'none';
+      const emptyEl = document.getElementById('sankey-empty');
+      emptyEl.textContent = 'Flow diagram failed to render (' + err.message + ') — see the table.';
+      emptyEl.style.display = 'block';
+    }
+    try { renderTopTable(top); } catch (err) { console.error('renderTopTable failed:', err); }
   } catch (err) {
     console.error('refresh failed:', err);
     document.getElementById('last-updated').innerHTML =
