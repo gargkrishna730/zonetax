@@ -13,7 +13,7 @@ Scope: AWS/EKS first. Conntrack-based sampling for MVP (eBPF is a possible v2).
 - [x] **M3** — UI: live Sankey/chord diagram of $ flow between AZs + top-offenders table
       (namespace/workload breakdown). Static SPA (D3.js from CDN, no build step), served by the
       collector via Go embed.FS at "/", polling /api/v1/costs + /api/v1/top every 10s. Iterated
-      three times on real user feedback against the live solrn-dev dashboard:
+      four times on real user feedback against the live solrn-dev dashboard:
       1. Two real bugs: cost math only counted AWS's per-direction rate (2x undercounted vs the
          real bill, since cross-AZ GB is billed at both ends); the zone-only Sankey graph crashed
          ("circular link") on bidirectional zone traffic, a common case, silently blanking the
@@ -21,18 +21,24 @@ Scope: AWS/EKS first. Conntrack-based sampling for MVP (eBPF is a possible v2).
          try/catch isolation.
       2. The 3-column DAG became unreadable once one workload's cost ($218) dwarfed the rest —
          replaced with a static circular zone map + workload filter dropdown. Still visually
-         collapsed (thick curved strokes between 3 close nodes rendered as solid filled wedges)
-         and, per user feedback comparing to a reference APM tool, wasn't interactive/draggable
-         like a real service map.
-      3. Rebuilt as a proper force-directed graph (d3-force + d3-drag + d3-zoom, all in the
-         existing d3@7 bundle, no new dependency): zones are fixed circular anchors, workloads
-         are draggable/sticky free nodes sized+colored by cost (red->green), edges run
-         workload->zone only (structurally acyclic by construction — same class of bug from
-         attempt #1 can't recur), pan/zoom supported, "Reset layout" clears dragged positions.
-         The workload filter now highlights/dims instead of removing nodes, so the full topology
-         stays visible per the user's explicit "I need to see all connections" requirement.
-         Verified node/edge math (no NaN, no orphan links, sticky positions across rebuilds)
-         against live cluster data via a headless Node harness before shipping.
+         collapsed and wasn't interactive/draggable like a reference APM service map.
+      3. Rebuilt as a force-directed graph (d3-force/drag/zoom): zone anchors + draggable
+         workload nodes, edges workload->home-zone. Fixed interactivity, but never actually
+         showed the thing being asked for — which zone the traffic went TO, only which zone a
+         workload lives in.
+      4. User pointed at a real APM service-map screenshot (boxes + directed labeled arrows,
+         source->destination) and asked for that shape directly. Rebuilt as a static zone-to-zone
+         flow diagram: nodes are zones only (placed on a closed-form circle/row layout, no
+         physics — nothing to converge badly or jump between renders), directed curved edges are
+         the real source-zone->destination-zone cost aggregate (the actual AWS billing
+         dimension), each edge has a $-cost pill label and arrowhead colored red->green by
+         relative cost, hover shows the top contributing workloads per route. The workload
+         filter now recomputes this same zone-to-zone diagram scoped to just that workload's
+         traffic, answering "where does this workload's data actually go" directly. Verified
+         geometry (no NaN, correct directional separation of forward/reverse routes, correct
+         behavior when filtered to a single workload, correct empty-state when a workload has
+         no cross-AZ traffic) against live cluster data via a headless Node harness before
+         shipping.
 - [ ] **M4** — Alerting: Slack webhook on $/hour threshold breach.
 - [ ] **M5** — CLI (`zonetax top`, `zonetax report --since 1h`) hitting the collector API.
 - [ ] **M6** — Polish: multi-arch CI images, demo GIF against a real multi-AZ EKS cluster,
