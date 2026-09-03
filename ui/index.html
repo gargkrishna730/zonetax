@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZoneTax — Cross-AZ Cost Monitor</title>
 <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
-<script src="https://cdn.jsdelivr.net/npm/d3-scale-chromatic@3"></script>
 <style>
   :root {
     --bg: #0b0e14;
@@ -16,11 +15,6 @@
     --accent: #ff6b4a;
     --accent-dim: #d9502f;
     --good: #4ade80;
-    --az-a: #4f9dde;
-    --az-b: #ff6b4a;
-    --az-c: #ffd166;
-    --az-d: #9d7bd8;
-    --az-e: #60a5fa;
   }
   * { box-sizing: border-box; }
   body {
@@ -38,31 +32,13 @@
     flex-wrap: wrap;
     gap: 12px;
   }
-  header h1 {
-    font-size: 20px;
-    margin: 0;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-  }
+  header h1 { font-size: 20px; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
   header h1 .tax { color: var(--accent); }
-  .meta {
-    font-size: 13px;
-    color: var(--text-dim);
-    display: flex;
-    gap: 18px;
-    align-items: center;
-  }
-  .meta .stale {
-    color: #f87171;
-    font-weight: 600;
-  }
+  .meta { font-size: 13px; color: var(--text-dim); display: flex; gap: 18px; align-items: center; }
+  .meta .stale { color: #f87171; font-weight: 600; }
   .dot {
-    display: inline-block;
-    width: 7px; height: 7px;
-    border-radius: 50%;
-    background: var(--good);
-    margin-right: 6px;
-    box-shadow: 0 0 6px var(--good);
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--good); margin-right: 6px; box-shadow: 0 0 6px var(--good);
   }
   main {
     padding: 24px 28px 40px;
@@ -72,146 +48,71 @@
     grid-template-columns: 2fr 1fr;
     gap: 22px;
   }
-  @media (max-width: 980px) {
-    main { grid-template-columns: 1fr; }
-  }
-  .card {
-    background: var(--panel);
-    border: 1px solid var(--panel-border);
-    border-radius: 10px;
-    padding: 18px 20px;
-  }
+  @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 10px; padding: 18px 20px; }
   .card-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    flex-wrap: wrap;
-    margin-bottom: 4px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; flex-wrap: wrap; margin-bottom: 4px;
   }
   .card h2 {
-    font-size: 13px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-dim);
-    margin: 0;
-    font-weight: 600;
+    font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--text-dim); margin: 0; font-weight: 600;
   }
-  .flow-summary {
-    font-size: 12px;
-    color: var(--text-dim);
-    margin: 2px 0 12px;
+  .head-controls { display: flex; gap: 8px; align-items: center; }
+  .flow-summary { font-size: 12px; color: var(--text-dim); margin: 2px 0 10px; }
+  select#workload-filter, button.reset-btn {
+    background: #0e1219; color: var(--text); border: 1px solid var(--panel-border);
+    border-radius: 6px; padding: 6px 10px; font-size: 12px; max-width: 260px; cursor: pointer;
   }
-  select#workload-filter {
-    background: #0e1219;
-    color: var(--text);
-    border: 1px solid var(--panel-border);
-    border-radius: 6px;
-    padding: 6px 10px;
-    font-size: 12px;
-    max-width: 260px;
-  }
-  .kpis {
-    grid-column: 1 / -1;
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 14px;
-  }
-  @media (max-width: 700px) {
-    .kpis { grid-template-columns: repeat(2, 1fr); }
-  }
-  .kpi .label {
-    font-size: 12px;
-    color: var(--text-dim);
-    margin-bottom: 6px;
-  }
-  .kpi .value {
-    font-size: 26px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-  }
+  button.reset-btn:hover { border-color: #3a4256; }
+  .kpis { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  @media (max-width: 700px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
+  .kpi .label { font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+  .kpi .value { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; }
   .kpi .value.cost { color: var(--accent); }
-  .kpi .sub {
-    font-size: 12px;
-    color: var(--text-dim);
-    margin-top: 4px;
-  }
-  #flow-wrap { width: 100%; overflow-x: auto; }
-  #flow-svg { display: block; }
-  #flow-svg .node-circle {
-    stroke: rgba(255,255,255,0.18);
-    stroke-width: 1.5px;
-  }
-  #flow-svg .node-label {
-    fill: var(--text);
-    font-size: 12px;
-    font-weight: 600;
-    pointer-events: none;
-    text-anchor: middle;
-  }
-  #flow-svg .edge-path {
-    fill: none;
-    opacity: 0.85;
-    transition: opacity 0.15s;
-  }
-  #flow-svg .edge-path:hover { opacity: 1; stroke-width: 4; }
-  .legend {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 11px;
-    color: var(--text-dim);
-    margin: 10px 0 4px;
-  }
-  .legend-bar {
-    width: 140px;
-    height: 8px;
-    border-radius: 4px;
-    background: linear-gradient(90deg, #1a9850, #fee08b, #d73027);
-  }
-  table {
+  .kpi .sub { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
+  #flow-wrap {
     width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    background:
+      linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px) 0 0/24px 24px,
+      linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px) 0 0/24px 24px,
+      #0e1219;
+    overflow: hidden;
   }
+  #flow-svg { display: block; cursor: grab; }
+  #flow-svg:active { cursor: grabbing; }
+  #flow-svg .zone-circle { stroke: rgba(255,255,255,0.25); stroke-width: 1.5px; }
+  #flow-svg .zone-label { fill: var(--text); font-size: 13px; font-weight: 700; pointer-events: none; text-anchor: middle; }
+  #flow-svg .wl-circle { stroke: rgba(255,255,255,0.15); stroke-width: 1.5px; cursor: grab; }
+  #flow-svg .wl-circle:active { cursor: grabbing; }
+  #flow-svg .wl-label {
+    fill: var(--text-dim); font-size: 10px; pointer-events: none; text-anchor: middle;
+    transition: fill 0.15s, font-weight 0.15s;
+  }
+  #flow-svg .edge-line { transition: opacity 0.15s, stroke-width 0.15s; }
+  #flow-svg .node-dimmed { opacity: 0.15; }
+  #flow-svg .edge-dimmed { opacity: 0.06; }
+  .legend { display: flex; align-items: center; gap: 16px; font-size: 11px; color: var(--text-dim); margin: 10px 0 4px; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-swatch { width: 14px; height: 14px; border-radius: 50%; display: inline-block; }
+  .legend-bar { width: 120px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, #1a9850, #fee08b, #d73027); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th {
-    text-align: left;
-    color: var(--text-dim);
-    font-weight: 600;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    padding: 6px 8px;
+    text-align: left; color: var(--text-dim); font-weight: 600; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.04em; padding: 6px 8px;
     border-bottom: 1px solid var(--panel-border);
   }
-  td {
-    padding: 8px 8px;
-    border-bottom: 1px solid rgba(255,255,255,0.04);
-    vertical-align: top;
-  }
+  td { padding: 8px 8px; border-bottom: 1px solid rgba(255,255,255,0.04); vertical-align: top; }
   td.workload { font-weight: 600; }
   td.ns { color: var(--text-dim); font-size: 12px; }
   td.zones { color: var(--text-dim); font-size: 12px; white-space: nowrap; }
   td.cost { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
   td.gb { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-dim); }
-  .cost-dot {
-    display: inline-block;
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    margin-right: 6px;
-  }
-  .empty {
-    color: var(--text-dim);
-    font-size: 13px;
-    padding: 24px 0;
-    text-align: center;
-  }
-  footer {
-    text-align: center;
-    padding: 24px;
-    color: var(--text-dim);
-    font-size: 12px;
-  }
+  .cost-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  .empty { color: var(--text-dim); font-size: 13px; padding: 24px 0; text-align: center; }
+  footer { text-align: center; padding: 24px; color: var(--text-dim); font-size: 12px; }
   footer a { color: var(--text-dim); }
 </style>
 </head>
@@ -251,12 +152,18 @@
 
   <div class="card">
     <div class="card-head">
-      <h2>Zone flow map</h2>
-      <select id="workload-filter"><option value="">All workloads</option></select>
+      <h2>Service flow map</h2>
+      <div class="head-controls">
+        <select id="workload-filter"><option value="">All workloads</option></select>
+        <button class="reset-btn" id="reset-layout" title="Re-run the layout and clear any dragged positions">Reset layout</button>
+      </div>
     </div>
     <div class="flow-summary" id="flow-summary"></div>
     <div class="legend">
-      <span>Lower cost</span><div class="legend-bar"></div><span>Higher cost</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:#5b6478"></span>availability zone</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:#8b93a7;opacity:0.6"></span>workload</span>
+      <span class="legend-item">edge cost: <div class="legend-bar"></div> low → high</span>
+      <span class="legend-item" style="color:#5b6478">Drag nodes · scroll to zoom · click a workload to focus</span>
     </div>
     <div id="flow-wrap"><svg id="flow-svg"></svg></div>
     <div class="empty" id="flow-empty" style="display:none;">No cross-AZ traffic observed yet.</div>
@@ -331,9 +238,8 @@ async function fetchJSON(path) {
   return res.json();
 }
 
-// workloadKey/workloadLabel give each (namespace, workload) pair a stable filter identity —
-// two different namespaces could in principle run a same-named workload, so namespace is part
-// of the key even though it's not shown in the dropdown text (kept short/scannable there).
+// workloadKey gives each (namespace, workload) pair a stable identity — two different
+// namespaces could in principle run a same-named workload.
 const workloadKey = e => (e.src_namespace || '') + '|' + (e.src_workload || '(unknown)');
 
 function populateWorkloadFilter(entries) {
@@ -350,9 +256,6 @@ function populateWorkloadFilter(entries) {
   }
   const sorted = Array.from(totals.entries()).sort((a, b) => b[1].cost - a[1].cost);
 
-  // Rebuilding options each refresh is simplest and cheap (typically a handful of workloads);
-  // preserving the previously-selected value (if it still exists) avoids the filter silently
-  // resetting to "All" out from under the user on every 10s poll.
   select.innerHTML = '<option value="">All workloads</option>' + sorted.map(([key, v]) =>
     `<option value="${escapeHTML(key)}">${escapeHTML(v.label)} — ${fmtUSD(v.cost)}</option>`
   ).join('');
@@ -382,26 +285,82 @@ function renderKPIs(costs) {
   }
 }
 
-// renderFlowMap draws a compact node-link "zone map": nodes are availability zones (typically
-// 2-4 of them, so a fixed circular layout is simple and never needs a force simulation),
-// directed curved edges between zones colored red->green by relative cost and sized by
-// sqrt(cost) so one dominant flow doesn't visually crush the others. This replaced an earlier
-// d3-sankey version that (a) crashed on bidirectional zone traffic and (b) crammed a third
-// "workload" column into the diagram that became unreadable once cost was skewed — the
-// workload dimension now lives in the filter dropdown instead, which scales far better.
+// --- Force-directed service flow map -----------------------------------------------------
+//
+// Design (this replaced two earlier attempts — a d3-sankey column diagram that crashed on
+// bidirectional zone traffic, then a static 3-node circular zone map that visually collapsed
+// into solid wedges once one flow's cost dwarfed the rest):
+//
+//   - Bipartite graph: zone nodes (fixed anchors, arranged in a circle) + workload nodes
+//     (free-floating, positioned by a real d3-force simulation). Edges only run
+//     workload -> zone (the zone the workload SENT cross-AZ traffic FROM), so the graph is
+//     structurally guaranteed to have no zone-zone cycles — the exact bug class that broke the
+//     first version.
+//   - Draggable + zoomable, like a real service map: nodes you drag stay pinned (sticky) until
+//     "Reset layout" is clicked, exactly what was asked for.
+//   - The workload filter no longer *removes* nodes from the graph (which was the "ugly"
+//     failure mode when one workload dominated); it highlights the selected workload and its
+//     edges, dimming everything else — so you can always see the whole topology and just focus
+//     attention, matching how the reference APM map behaves.
+//   - Edge/workload-node color is cost-relative (red = expensive, green = cheap), edge width is
+//     sqrt(cost)-scaled so a $200 flow doesn't visually erase a $0.01 flow.
+let flowSim = null;      // the running d3-force simulation, kept across renders so drag/zoom state persists
+let flowZoomBehavior = null;
+let flowNodesById = new Map(); // node id -> node object, reused across refreshes to preserve drag positions
+
+function buildFlowGraph(entries) {
+  const zones = Array.from(new Set(entries.flatMap(e => [e.src_zone, e.dst_zone])));
+  const workloadTotals = new Map(); // key -> { label, namespace, cost }
+  for (const e of entries) {
+    const key = workloadKey(e);
+    const cur = workloadTotals.get(key) || { label: e.src_workload || '(unknown)', namespace: e.src_namespace || '', cost: 0 };
+    cur.cost += e.cost_usd;
+    workloadTotals.set(key, cur);
+  }
+
+  const nodes = [];
+  const idIndex = new Map();
+  const addNode = (id, data) => {
+    // Reuse the existing node object (with its current x/y/fx/fy from a prior render) when
+    // present, so dragged/settled positions survive each 10s data refresh instead of the whole
+    // simulation restarting from scratch and jumping around under the user's cursor.
+    const existing = flowNodesById.get(id);
+    const node = existing ? Object.assign(existing, data) : Object.assign({ id }, data);
+    flowNodesById.set(id, node);
+    idIndex.set(id, nodes.length);
+    nodes.push(node);
+  };
+
+  zones.forEach(z => addNode('z:' + z, { type: 'zone', label: z }));
+  for (const [key, v] of workloadTotals) {
+    addNode('w:' + key, { type: 'workload', label: v.label, namespace: v.namespace, cost: v.cost, filterKey: key });
+  }
+
+  const linkTotals = new Map(); // "w:key>z:zone" -> cost
+  for (const e of entries) {
+    const key = 'w:' + workloadKey(e) + '>' + 'z:' + e.src_zone;
+    linkTotals.set(key, (linkTotals.get(key) || 0) + e.cost_usd);
+  }
+  const links = Array.from(linkTotals.entries()).map(([key, cost]) => {
+    const [source, target] = key.split('>');
+    return { source, target, cost };
+  });
+
+  return { nodes, links, zones, maxWorkloadCost: Math.max(0, ...Array.from(workloadTotals.values()).map(v => v.cost)) };
+}
+
 function renderFlowMap(entries, filterKey) {
   const svgEl = document.getElementById('flow-svg');
   const wrap = document.getElementById('flow-wrap');
   const emptyEl = document.getElementById('flow-empty');
   const summaryEl = document.getElementById('flow-summary');
-  const svg = d3.select(svgEl);
-  svg.selectAll('*').remove();
 
-  const filtered = (entries || []).filter(e => e.cost_usd > 0 && (!filterKey || workloadKey(e) === filterKey));
-
-  if (filtered.length === 0) {
+  const withCost = (entries || []).filter(e => e.cost_usd > 0);
+  if (withCost.length === 0) {
+    if (flowSim) { flowSim.stop(); flowSim = null; }
+    d3.select(svgEl).selectAll('*').remove();
     svgEl.style.display = 'none';
-    emptyEl.textContent = filterKey ? 'No cross-AZ traffic for this workload right now.' : 'No cross-AZ traffic observed yet.';
+    emptyEl.textContent = 'No cross-AZ traffic observed yet.';
     emptyEl.style.display = 'block';
     summaryEl.textContent = '';
     return;
@@ -409,113 +368,147 @@ function renderFlowMap(entries, filterKey) {
   svgEl.style.display = 'block';
   emptyEl.style.display = 'none';
 
-  // Aggregate cost per (src_zone, dst_zone) pair, and track which workloads contribute to each
-  // pair (for the hover tooltip) even when "All workloads" is selected.
-  const pairTotals = new Map(); // "src>dst" -> { cost, gb, workloads: Map<label, cost> }
-  for (const e of filtered) {
-    const key = e.src_zone + '>' + e.dst_zone;
-    const cur = pairTotals.get(key) || { srcZone: e.src_zone, dstZone: e.dst_zone, cost: 0, gb: 0, workloads: new Map() };
-    cur.cost += e.cost_usd;
-    cur.gb += e.gb;
-    const wLabel = e.src_workload || '(unknown)';
-    cur.workloads.set(wLabel, (cur.workloads.get(wLabel) || 0) + e.cost_usd);
-    pairTotals.set(key, cur);
-  }
+  const totalCost = withCost.reduce((s, e) => s + e.cost_usd, 0);
+  const totalGB = withCost.reduce((s, e) => s + e.gb, 0);
+  const zoneCount = new Set(withCost.flatMap(e => [e.src_zone, e.dst_zone])).size;
+  summaryEl.textContent = `${zoneCount} zone${zoneCount === 1 ? '' : 's'} · ${new Set(withCost.map(workloadKey)).size} workload${new Set(withCost.map(workloadKey)).size === 1 ? '' : 's'} · ${fmtUSD(totalCost)} · ${fmtGB(totalGB)}`;
 
-  const totalCost = filtered.reduce((s, e) => s + e.cost_usd, 0);
-  const totalGB = filtered.reduce((s, e) => s + e.gb, 0);
-  summaryEl.textContent = `${pairTotals.size} zone-pair flow${pairTotals.size === 1 ? '' : 's'} · ${fmtUSD(totalCost)} · ${fmtGB(totalGB)}`;
+  const { nodes, links, zones, maxWorkloadCost } = buildFlowGraph(withCost);
 
-  const zones = Array.from(new Set(filtered.flatMap(e => [e.src_zone, e.dst_zone])));
-  const width = Math.max(480, wrap.clientWidth - 4);
-  const height = Math.max(260, Math.min(420, 220 + zones.length * 10));
-  svg.attr('width', width).attr('height', height);
+  const width = Math.max(560, wrap.clientWidth - 4);
+  const height = 460;
+  svgEl.setAttribute('width', width);
+  svgEl.setAttribute('height', height);
 
-  // Fixed circular layout: with a handful of zones (almost always 2-5) this reads far cleaner
-  // than a force simulation, and it's deterministic — the diagram doesn't jitter on every poll.
+  const svg = d3.select(svgEl);
+  svg.selectAll('*').remove();
+  const zoomLayer = svg.append('g').attr('class', 'zoom-layer');
+
+  // Anchor zones in a fixed circle so they act as stable landmarks the workloads orbit —
+  // matches the reference map's "central services stay put, callers move" feel. fx/fy pins a
+  // d3-force node in place; without this zones would drift with everything else on every tick.
   const cx = width / 2, cy = height / 2;
-  const r = Math.min(width, height) / 2 - 70;
-  const nodePos = new Map();
+  const r = Math.min(width, height) / 2 - 90;
   zones.forEach((z, i) => {
     const angle = -Math.PI / 2 + i * (2 * Math.PI / zones.length);
-    nodePos.set(z, { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) });
+    const node = flowNodesById.get('z:' + z);
+    // Only (re)pin to the ideal anchor position if the user hasn't already dragged this zone —
+    // dragged nodes keep fx/fy set from the drag handler and should stay wherever they were put.
+    if (node.fx === undefined || node.fx === null) { node.fx = cx + r * Math.cos(angle); node.fy = cy + r * Math.sin(angle); }
   });
 
-  const links = Array.from(pairTotals.values());
-  const maxCost = Math.max(...links.map(l => l.cost));
-  const widthScale = d3.scaleSqrt().domain([0, maxCost]).range([2, 14]).clamp(true);
-  const nodeRadius = zones.length <= 3 ? 42 : 34;
+  const zoneNodeRadius = 30;
+  const workloadRadiusScale = d3.scaleSqrt().domain([0, maxWorkloadCost]).range([8, 20]).clamp(true);
+  const edgeWidthScale = d3.scaleSqrt().domain([0, maxWorkloadCost]).range([1, 6]).clamp(true);
 
-  const defs = svg.append('defs');
+  if (flowSim) flowSim.stop();
+  flowSim = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(links).id(d => d.id).distance(120).strength(0.5))
+    .force('charge', d3.forceManyBody().strength(d => d.type === 'zone' ? -60 : -220))
+    .force('collide', d3.forceCollide(d => (d.type === 'zone' ? zoneNodeRadius : workloadRadiusScale(d.cost)) + 8))
+    .force('x', d3.forceX(width / 2).strength(0.02))
+    .force('y', d3.forceY(height / 2).strength(0.02))
+    .alpha(0.9)
+    .alphaDecay(0.03);
 
-  // Curved directed edges. When both A->B and B->A exist, curving them to opposite sides keeps
-  // both visible instead of overlapping into one indistinguishable line.
-  const edgeGroup = svg.append('g');
-  links.forEach((l, i) => {
-    const a = nodePos.get(l.srcZone), b = nodePos.get(l.dstZone);
-    const dx = b.x - a.x, dy = b.y - a.y;
-    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-    // Shrink the endpoint to the node's edge (not center) so the line doesn't run under the
-    // node circle, and pull it back a bit further at the target end to leave room for the
-    // arrowhead marker.
-    const ux = dx / dist, uy = dy / dist;
-    const startX = a.x + ux * nodeRadius, startY = a.y + uy * nodeRadius;
-    const endX = b.x - ux * (nodeRadius + 10), endY = b.y - uy * (nodeRadius + 10);
-    const mx = (startX + endX) / 2, my = (startY + endY) / 2;
-    // Curve direction: consistently offset based on zone order so A->B and B->A bow to
-    // opposite sides regardless of which one happens to be drawn first.
-    const sign = l.srcZone < l.dstZone ? 1 : -1;
-    const curveAmount = Math.min(dist * 0.28, 40) * sign;
-    const nx = -uy, ny = ux; // perpendicular unit vector
-    const ctrlX = mx + nx * curveAmount, ctrlY = my + ny * curveAmount;
+  const edgeGroup = zoomLayer.append('g');
+  const edgeSel = edgeGroup.selectAll('line')
+    .data(links)
+    .join('line')
+    .attr('class', 'edge-line')
+    .attr('stroke', d => costColor(d.cost, maxWorkloadCost))
+    .attr('stroke-width', d => edgeWidthScale(d.cost))
+    .attr('stroke-linecap', 'round')
+    .append('title')
+    .text(d => ''); // populated below once we know source/target labels
 
-    const color = costColor(l.cost, maxCost);
-    const markerId = 'arrow-' + i;
-    defs.append('marker')
-      .attr('id', markerId)
-      .attr('viewBox', '0 0 10 10')
-      .attr('refX', 8).attr('refY', 5)
-      .attr('markerWidth', 7).attr('markerHeight', 7)
-      .attr('orient', 'auto-start-reverse')
-      .append('path')
-      .attr('d', 'M0,0 L10,5 L0,10 Z')
-      .attr('fill', color);
-
-    const topWorkloads = Array.from(l.workloads.entries()).sort((a, b) => b[1] - a[1]);
-    const tooltipLines = [`${l.srcZone} → ${l.dstZone}`, `${fmtUSD(l.cost)} · ${fmtGB(l.gb)}`, ''];
-    for (const [label, cost] of topWorkloads.slice(0, 5)) {
-      tooltipLines.push(`${label}: ${fmtUSD(cost)}`);
-    }
-    if (topWorkloads.length > 5) tooltipLines.push(`+${topWorkloads.length - 5} more`);
-
-    edgeGroup.append('path')
-      .attr('class', 'edge-path')
-      .attr('d', `M${startX},${startY} Q${ctrlX},${ctrlY} ${endX},${endY}`)
-      .attr('stroke', color)
-      .attr('stroke-width', widthScale(l.cost))
-      .attr('marker-end', `url(#${markerId})`)
-      .append('title')
-      .text(tooltipLines.join('\n'));
+  edgeGroup.selectAll('line').each(function (d) {
+    const srcNode = flowNodesById.get(typeof d.source === 'object' ? d.source.id : d.source);
+    const dstNode = flowNodesById.get(typeof d.target === 'object' ? d.target.id : d.target);
+    d3.select(this).select('title').text(`${srcNode.label} → ${dstNode.label}\n${fmtUSD(d.cost)}`);
   });
 
-  // Nodes drawn after edges so they sit on top, hiding the raw line endpoints.
-  const nodeGroup = svg.append('g');
-  zones.forEach(z => {
-    const pos = nodePos.get(z);
-    const g = nodeGroup.append('g').attr('transform', `translate(${pos.x},${pos.y})`);
-    g.append('circle')
-      .attr('class', 'node-circle')
-      .attr('r', nodeRadius)
-      .attr('fill', '#1a1f2b')
-      .attr('stroke', zoneColor(z))
-      .attr('stroke-width', 2.5)
-      .append('title')
-      .text(z);
-    g.append('text')
-      .attr('class', 'node-label')
-      .attr('dy', '0.35em')
-      .text(z.length > 12 ? z.replace(/^.*-/, '') : z);
+  const nodeGroup = zoomLayer.append('g');
+  const nodeSel = nodeGroup.selectAll('g.node')
+    .data(nodes, d => d.id)
+    .join('g')
+    .attr('class', 'node')
+    .style('cursor', d => d.type === 'workload' ? 'pointer' : 'default');
+
+  nodeSel.append('circle')
+    .attr('class', d => d.type === 'zone' ? 'zone-circle' : 'wl-circle')
+    .attr('r', d => d.type === 'zone' ? zoneNodeRadius : workloadRadiusScale(d.cost))
+    .attr('fill', d => d.type === 'zone' ? zoneColor(d.label) : costColor(d.cost, maxWorkloadCost))
+    .append('title')
+    .text(d => d.type === 'zone' ? d.label : `${d.label}\n${d.namespace}\n${fmtUSD(d.cost)}`);
+
+  nodeSel.filter(d => d.type === 'zone').append('text')
+    .attr('class', 'zone-label')
+    .attr('dy', '0.35em')
+    .text(d => d.label.length > 13 ? d.label.replace(/^.*-/, '') : d.label);
+
+  nodeSel.filter(d => d.type === 'workload').append('text')
+    .attr('class', 'wl-label')
+    .attr('dy', d => workloadRadiusScale(d.cost) + 12)
+    .text(d => d.label.length > 18 ? d.label.slice(0, 17) + '…' : d.label);
+
+  nodeSel.filter(d => d.type === 'workload').on('click', (event, d) => {
+    const select = document.getElementById('workload-filter');
+    select.value = select.value === d.filterKey ? '' : d.filterKey;
+    select.dispatchEvent(new Event('change'));
   });
+
+  // Highlight (not remove) the selected workload and its edges, dimming the rest — keeps the
+  // whole topology visible at all times per the user's explicit "I need to see all connections"
+  // requirement, while still letting them focus on one workload's traffic.
+  if (filterKey) {
+    nodeSel.classed('node-dimmed', d => !(d.type === 'workload' && d.filterKey === filterKey) && d.type !== 'zone');
+    edgeSel.classed('edge-dimmed', d => {
+      const srcId = typeof d.source === 'object' ? d.source.id : d.source;
+      return srcId !== 'w:' + filterKey;
+    });
+  }
+
+  nodeSel.call(
+    d3.drag()
+      .on('start', (event, d) => { if (!event.active) flowSim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+      .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
+      .on('end', (event, d) => {
+        if (!event.active) flowSim.alphaTarget(0);
+        // Sticky: keep fx/fy set after drag ends so the node stays exactly where dropped,
+        // instead of snapping back into the simulation — this is the "I can move workloads"
+        // behavior from the reference screenshot. "Reset layout" is the escape hatch.
+      })
+  );
+
+  flowSim.on('tick', () => {
+    edgeSel
+      .attr('x1', d => (typeof d.source === 'object' ? d.source.x : flowNodesById.get(d.source).x))
+      .attr('y1', d => (typeof d.source === 'object' ? d.source.y : flowNodesById.get(d.source).y))
+      .attr('x2', d => (typeof d.target === 'object' ? d.target.x : flowNodesById.get(d.target).x))
+      .attr('y2', d => (typeof d.target === 'object' ? d.target.y : flowNodesById.get(d.target).y));
+    nodeSel.attr('transform', d => `translate(${d.x},${d.y})`);
+  });
+
+  if (!flowZoomBehavior) {
+    flowZoomBehavior = d3.zoom()
+      .scaleExtent([0.4, 3])
+      .on('zoom', (event) => zoomLayer.attr('transform', event.transform));
+  }
+  svg.call(flowZoomBehavior);
+}
+
+function resetFlowLayout() {
+  // Clears every node's pinned position (except zones, which get re-pinned to their ideal
+  // anchor spot on the next render) and resets pan/zoom, then re-renders immediately.
+  for (const node of flowNodesById.values()) {
+    if (node.type === 'workload') { node.fx = null; node.fy = null; }
+    else { node.fx = null; node.fy = null; } // will be re-anchored in renderFlowMap
+  }
+  if (flowZoomBehavior) {
+    d3.select('#flow-svg').call(flowZoomBehavior.transform, d3.zoomIdentity);
+  }
+  if (lastCosts) renderAll(lastCosts);
 }
 
 function renderTopTable(entries, filterKey) {
@@ -557,9 +550,9 @@ function renderAll(costs) {
   try { renderKPIs(costs); } catch (err) { console.error('renderKPIs failed:', err); }
   try { populateWorkloadFilter(costs.entries || []); } catch (err) { console.error('populateWorkloadFilter failed:', err); }
   // Each render is isolated: a bug in one section must not take down the others. Lesson from a
-  // real bug — the old Sankey diagram threw on bidirectional zone traffic (a common, legitimate
-  // case) and that single uncaught exception silently blanked the KPI cards and offenders table
-  // too, since they all lived in one try/catch.
+  // real bug — an earlier version of this diagram threw on bidirectional zone traffic (a
+  // common, legitimate case) and that single uncaught exception silently blanked the KPI cards
+  // and offenders table too, since they all lived in one try/catch.
   try { renderFlowMap(costs.entries || [], filterKey); } catch (err) {
     console.error('renderFlowMap failed:', err);
     document.getElementById('flow-svg').style.display = 'none';
@@ -583,10 +576,10 @@ async function refresh() {
 }
 
 document.getElementById('workload-filter').addEventListener('change', () => {
-  // Re-render from cached data instantly on filter change — no need to wait for the next poll
-  // or round-trip to the server, since the filter only changes what we show, not the data.
+  // Re-render from cached data instantly on filter change — no need to wait for the next poll.
   if (lastCosts) renderAll(lastCosts);
 });
+document.getElementById('reset-layout').addEventListener('click', resetFlowLayout);
 
 refresh();
 setInterval(refresh, POLL_MS);

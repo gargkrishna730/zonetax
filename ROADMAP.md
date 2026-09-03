@@ -13,19 +13,26 @@ Scope: AWS/EKS first. Conntrack-based sampling for MVP (eBPF is a possible v2).
 - [x] **M3** — UI: live Sankey/chord diagram of $ flow between AZs + top-offenders table
       (namespace/workload breakdown). Static SPA (D3.js from CDN, no build step), served by the
       collector via Go embed.FS at "/", polling /api/v1/costs + /api/v1/top every 10s. Iterated
-      twice on real user feedback against the live solrn-dev dashboard:
+      three times on real user feedback against the live solrn-dev dashboard:
       1. Two real bugs: cost math only counted AWS's per-direction rate (2x undercounted vs the
          real bill, since cross-AZ GB is billed at both ends); the zone-only Sankey graph crashed
          ("circular link") on bidirectional zone traffic, a common case, silently blanking the
          whole page. Fixed with a workload->src-zone->dst-zone 3-column DAG + per-section
          try/catch isolation.
-      2. The 3-column DAG became unreadable once one workload's cost ($218) dwarfed the rest
-         ($0.0001 range) — dozens of overlapping unreadable labels. Replaced with a compact
-         fixed-layout node-link zone map (nodes = AZs, curved directed edges = cost flows,
-         red->green color scale by relative cost, sqrt-scaled edge width so the dominant flow
-         doesn't crush the rest) plus a workload filter dropdown (the "service map" need is now
-         served by filtering, not by cramming every workload into the diagram) and a
-         red/green cost color on the offenders table too.
+      2. The 3-column DAG became unreadable once one workload's cost ($218) dwarfed the rest —
+         replaced with a static circular zone map + workload filter dropdown. Still visually
+         collapsed (thick curved strokes between 3 close nodes rendered as solid filled wedges)
+         and, per user feedback comparing to a reference APM tool, wasn't interactive/draggable
+         like a real service map.
+      3. Rebuilt as a proper force-directed graph (d3-force + d3-drag + d3-zoom, all in the
+         existing d3@7 bundle, no new dependency): zones are fixed circular anchors, workloads
+         are draggable/sticky free nodes sized+colored by cost (red->green), edges run
+         workload->zone only (structurally acyclic by construction — same class of bug from
+         attempt #1 can't recur), pan/zoom supported, "Reset layout" clears dragged positions.
+         The workload filter now highlights/dims instead of removing nodes, so the full topology
+         stays visible per the user's explicit "I need to see all connections" requirement.
+         Verified node/edge math (no NaN, no orphan links, sticky positions across rebuilds)
+         against live cluster data via a headless Node harness before shipping.
 - [ ] **M4** — Alerting: Slack webhook on $/hour threshold breach.
 - [ ] **M5** — CLI (`zonetax top`, `zonetax report --since 1h`) hitting the collector API.
 - [ ] **M6** — Polish: multi-arch CI images, demo GIF against a real multi-AZ EKS cluster,
