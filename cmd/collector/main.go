@@ -18,6 +18,7 @@ import (
 	"github.com/gargkrishna730/zonetax/internal/api"
 	"github.com/gargkrishna730/zonetax/internal/collector"
 	"github.com/gargkrishna730/zonetax/internal/pricing"
+	"github.com/gargkrishna730/zonetax/ui"
 )
 
 const (
@@ -60,6 +61,7 @@ func main() {
 	})
 	mux.HandleFunc("/api/v1/costs", handler.Costs)
 	mux.HandleFunc("/api/v1/top", handler.Top)
+	mux.Handle("/", http.FileServer(http.FS(ui.FS())))
 
 	addr := ":8080"
 	srv := &http.Server{Addr: addr, Handler: mux}

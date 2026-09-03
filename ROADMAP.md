@@ -10,8 +10,9 @@ Scope: AWS/EKS first. Conntrack-based sampling for MVP (eBPF is a possible v2).
 - [x] **M2** — Cost engine: versioned AWS pricing table (YAML), collector aggregates AZ-pair bytes
       into $ cost, REST API to query current/historical spend. Deployed and validated live against
       solrn-dev — see "Known limitations" below.
-- [ ] **M3** — UI: live Sankey/chord diagram of $ flow between AZs + top-offenders table
-      (namespace/workload breakdown). Static SPA, no build step, served by the collector.
+- [x] **M3** — UI: live Sankey/chord diagram of $ flow between AZs + top-offenders table
+      (namespace/workload breakdown). Static SPA (D3.js from CDN, no build step), served by the
+      collector via Go embed.FS at "/", polling /api/v1/costs + /api/v1/top every 10s.
 - [ ] **M4** — Alerting: Slack webhook on $/hour threshold breach.
 - [ ] **M5** — CLI (`zonetax top`, `zonetax report --since 1h`) hitting the collector API.
 - [ ] **M6** — Polish: multi-arch CI images, demo GIF against a real multi-AZ EKS cluster,

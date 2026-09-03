@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZoneTax — Cross-AZ Cost Monitor</title>
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-sankey@0.12"></script>
+<style>
+  :root {
+    --bg: #0b0e14;
+    --panel: #131720;
+    --panel-border: #232838;
+    --text: #e6e9f0;
+    --text-dim: #8b93a7;
+    --accent: #ff6b4a;
+    --accent-dim: #d9502f;
+    --good: #4ade80;
+    --az-a: #4f9dde;
+    --az-b: #ff6b4a;
+    --az-c: #ffd166;
+    --az-d: #9d7bd8;
+    --az-e: #4ade80;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 20px 28px;
+    border-bottom: 1px solid var(--panel-border);
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  header h1 {
+    font-size: 20px;
+    margin: 0;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  header h1 .tax { color: var(--accent); }
+  .meta {
+    font-size: 13px;
+    color: var(--text-dim);
+    display: flex;
+    gap: 18px;
+    align-items: center;
+  }
+  .meta .stale {
+    color: #f87171;
+    font-weight: 600;
+  }
+  .dot {
+    display: inline-block;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--good);
+    margin-right: 6px;
+    box-shadow: 0 0 6px var(--good);
+  }
+  main {
+    padding: 24px 28px 40px;
+    max-width: 1400px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 22px;
+  }
+  @media (max-width: 980px) {
+    main { grid-template-columns: 1fr; }
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 18px 20px;
+  }
+  .card h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+    margin: 0 0 14px;
+    font-weight: 600;
+  }
+  .kpis {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+  }
+  @media (max-width: 700px) {
+    .kpis { grid-template-columns: repeat(2, 1fr); }
+  }
+  .kpi .label {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+  .kpi .value {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .kpi .value.cost { color: var(--accent); }
+  .kpi .sub {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+  #sankey-wrap { width: 100%; overflow-x: auto; }
+  #sankey { display: block; }
+  .node rect {
+    stroke: rgba(255,255,255,0.15);
+    stroke-width: 1px;
+    rx: 3;
+  }
+  .node text {
+    fill: var(--text);
+    font-size: 12px;
+    pointer-events: none;
+  }
+  .link {
+    fill: none;
+    stroke-opacity: 0.35;
+    transition: stroke-opacity 0.15s;
+  }
+  .link:hover { stroke-opacity: 0.65; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  th {
+    text-align: left;
+    color: var(--text-dim);
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--panel-border);
+  }
+  td {
+    padding: 8px 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    vertical-align: top;
+  }
+  td.workload { font-weight: 600; }
+  td.ns { color: var(--text-dim); font-size: 12px; }
+  td.zones { color: var(--text-dim); font-size: 12px; white-space: nowrap; }
+  td.cost { text-align: right; font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 600; }
+  td.gb { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-dim); }
+  .bar-bg {
+    height: 4px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 2px;
+    margin-top: 4px;
+    overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+    border-radius: 2px;
+  }
+  .empty {
+    color: var(--text-dim);
+    font-size: 13px;
+    padding: 24px 0;
+    text-align: center;
+  }
+  footer {
+    text-align: center;
+    padding: 24px;
+    color: var(--text-dim);
+    font-size: 12px;
+  }
+  footer a { color: var(--text-dim); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Zone<span class="tax">Tax</span></h1>
+  <div class="meta">
+    <span id="cluster-info">aws · —</span>
+    <span id="last-updated"><span class="dot"></span>connecting…</span>
+  </div>
+</header>
+
+<main>
+  <div class="card kpis">
+    <div class="kpi">
+      <div class="label">Cross-AZ spend (tracked)</div>
+      <div class="value cost" id="kpi-cost">$0.00</div>
+      <div class="sub" id="kpi-cost-sub">since agents last restarted</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Cross-AZ traffic</div>
+      <div class="value" id="kpi-gb">0 GB</div>
+      <div class="sub">billable, crossing zone boundaries</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Same-AZ traffic</div>
+      <div class="value" id="kpi-same-gb">0 GB</div>
+      <div class="sub">free, for comparison</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Price / GB</div>
+      <div class="value" id="kpi-price">$0.00</div>
+      <div class="sub" id="kpi-price-sub">—</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Cost flow between zones</h2>
+    <div id="sankey-wrap"><svg id="sankey"></svg></div>
+    <div class="empty" id="sankey-empty" style="display:none;">No cross-AZ traffic observed yet.</div>
+  </div>
+
+  <div class="card">
+    <h2>Top offenders</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Workload</th>
+          <th>Route</th>
+          <th style="text-align:right">GB</th>
+          <th style="text-align:right">Cost</th>
+        </tr>
+      </thead>
+      <tbody id="top-table-body"></tbody>
+    </table>
+    <div class="empty" id="top-empty" style="display:none;">No data yet.</div>
+  </div>
+</main>
+
+<footer>
+  ZoneTax · polling every 10s · <a href="https://github.com/gargkrishna730/zonetax" target="_blank">github.com/gargkrishna730/zonetax</a>
+</footer>
+
+<script>
+const POLL_MS = 10000;
+const AZ_COLORS = ['#4f9dde', '#ff6b4a', '#ffd166', '#9d7bd8', '#4ade80', '#f472b6', '#60a5fa'];
+const zoneColor = (() => {
+  const cache = {};
+  let i = 0;
+  return (zone) => {
+    if (!(zone in cache)) cache[zone] = AZ_COLORS[i++ % AZ_COLORS.length];
+    return cache[zone];
+  };
+})();
+
+function fmtUSD(v) {
+  if (v < 0.01 && v > 0) return '$' + v.toFixed(6);
+  return '$' + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtGB(v) {
+  if (v < 0.001 && v > 0) return (v * 1000).toFixed(3) + ' MB';
+  return v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' GB';
+}
+function fmtAgo(iso) {
+  if (!iso) return 'never';
+  const secs = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (secs < 5) return 'just now';
+  if (secs < 60) return secs + 's ago';
+  return Math.round(secs / 60) + 'm ago';
+}
+
+async function fetchJSON(path) {
+  const res = await fetch(path, { cache: 'no-store' });
+  if (!res.ok) throw new Error(path + ': HTTP ' + res.status);
+  return res.json();
+}
+
+function renderKPIs(costs) {
+  document.getElementById('cluster-info').textContent =
+    (costs.cloud || '—') + ' · ' + (costs.region || '—');
+  document.getElementById('kpi-cost').textContent = fmtUSD(costs.totals.cross_az_cost_usd);
+  document.getElementById('kpi-gb').textContent = fmtGB(costs.totals.cross_az_gb);
+  document.getElementById('kpi-same-gb').textContent = fmtGB(costs.totals.same_az_gb);
+  document.getElementById('kpi-price').textContent = fmtUSD(costs.totals.price_per_gb_usd) + '/GB';
+
+  const total = costs.totals.cross_az_gb + costs.totals.same_az_gb;
+  const pct = total > 0 ? ((costs.totals.cross_az_gb / total) * 100).toFixed(1) : '0';
+  document.getElementById('kpi-price-sub').textContent = pct + '% of traffic is cross-AZ';
+
+  const updatedEl = document.getElementById('last-updated');
+  if (costs.stale_error) {
+    updatedEl.innerHTML = '<span class="dot" style="background:#f87171;box-shadow:0 0 6px #f87171"></span><span class="stale">stale — ' + costs.stale_error + '</span>';
+  } else {
+    updatedEl.innerHTML = '<span class="dot"></span>updated ' + fmtAgo(costs.updated_at);
+  }
+}
+
+function renderSankey(entries) {
+  const svgEl = document.getElementById('sankey');
+  const wrap = document.getElementById('sankey-wrap');
+  const emptyEl = document.getElementById('sankey-empty');
+  const svg = d3.select(svgEl);
+  svg.selectAll('*').remove();
+
+  const withCost = (entries || []).filter(e => e.cost_usd > 0);
+  if (withCost.length === 0) {
+    svgEl.style.display = 'none';
+    emptyEl.style.display = 'block';
+    return;
+  }
+  svgEl.style.display = 'block';
+  emptyEl.style.display = 'none';
+
+  const width = Math.max(560, wrap.clientWidth - 4);
+  const height = 320;
+  svg.attr('width', width).attr('height', height);
+
+  // Aggregate by src_zone -> dst_zone (Sankey nodes are zones; per-workload detail lives in
+  // the table below rather than cluttering the diagram with dozens of thin flows).
+  const flowMap = new Map();
+  for (const e of withCost) {
+    const key = e.src_zone + '→' + e.dst_zone;
+    flowMap.set(key, (flowMap.get(key) || 0) + e.cost_usd);
+  }
+
+  const zoneNames = Array.from(new Set(withCost.flatMap(e => [e.src_zone, e.dst_zone])));
+  const nodeIndex = new Map(zoneNames.map((z, i) => [z, i]));
+  const nodes = zoneNames.map(z => ({ name: z }));
+  const links = Array.from(flowMap.entries()).map(([key, value]) => {
+    const [src, dst] = key.split('→');
+    return { source: nodeIndex.get(src), target: nodeIndex.get(dst), value, srcZone: src, dstZone: dst };
+  });
+
+  const sankey = d3.sankey()
+    .nodeWidth(16)
+    .nodePadding(24)
+    .extent([[1, 6], [width - 1, height - 6]]);
+
+  const graph = sankey({ nodes: nodes.map(d => Object.assign({}, d)), links: links.map(d => Object.assign({}, d)) });
+
+  svg.append('g')
+    .selectAll('path')
+    .data(graph.links)
+    .join('path')
+    .attr('class', 'link')
+    .attr('d', d3.sankeyLinkHorizontal())
+    .attr('stroke', d => zoneColor(d.srcZone))
+    .attr('stroke-width', d => Math.max(1.5, d.width))
+    .append('title')
+    .text(d => `${d.srcZone} → ${d.dstZone}\n${fmtUSD(d.value)}`);
+
+  const node = svg.append('g')
+    .selectAll('g')
+    .data(graph.nodes)
+    .join('g');
+
+  node.append('rect')
+    .attr('x', d => d.x0)
+    .attr('y', d => d.y0)
+    .attr('height', d => d.y1 - d.y0)
+    .attr('width', d => d.x1 - d.x0)
+    .attr('fill', d => zoneColor(d.name))
+    .append('title')
+    .text(d => d.name);
+
+  node.append('text')
+    .attr('x', d => d.x0 < width / 2 ? d.x1 + 8 : d.x0 - 8)
+    .attr('y', d => (d.y0 + d.y1) / 2)
+    .attr('dy', '0.35em')
+    .attr('text-anchor', d => d.x0 < width / 2 ? 'start' : 'end')
+    .text(d => d.name);
+}
+
+function renderTopTable(top) {
+  const body = document.getElementById('top-table-body');
+  const emptyEl = document.getElementById('top-empty');
+  const entries = (top.entries || []).filter(e => e.cost_usd > 0);
+
+  if (entries.length === 0) {
+    body.innerHTML = '';
+    emptyEl.style.display = 'block';
+    return;
+  }
+  emptyEl.style.display = 'none';
+
+  const maxCost = Math.max(...entries.map(e => e.cost_usd));
+  body.innerHTML = entries.map(e => `
+    <tr>
+      <td class="workload">${escapeHTML(e.src_workload || '(unknown)')}
+        <div class="ns">${escapeHTML(e.src_namespace || '')}</div>
+      </td>
+      <td class="zones">${escapeHTML(e.src_zone)} → ${escapeHTML(e.dst_zone)}</td>
+      <td class="gb">${fmtGB(e.gb)}</td>
+      <td class="cost">${fmtUSD(e.cost_usd)}
+        <div class="bar-bg"><div class="bar-fill" style="width:${(e.cost_usd / maxCost * 100).toFixed(1)}%"></div></div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function escapeHTML(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function refresh() {
+  try {
+    const [costs, top] = await Promise.all([
+      fetchJSON('/api/v1/costs'),
+      fetchJSON('/api/v1/top?n=15'),
+    ]);
+    renderKPIs(costs);
+    renderSankey(costs.entries);
+    renderTopTable(top);
+  } catch (err) {
+    console.error('refresh failed:', err);
+    document.getElementById('last-updated').innerHTML =
+      '<span class="dot" style="background:#f87171;box-shadow:0 0 6px #f87171"></span><span class="stale">fetch failed: ' + escapeHTML(err.message) + '</span>';
+  }
+}
+
+refresh();
+setInterval(refresh, POLL_MS);
+window.addEventListener('resize', () => refresh());
+</script>
+
+</body>
+</html>
