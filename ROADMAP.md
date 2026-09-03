@@ -12,15 +12,20 @@ Scope: AWS/EKS first. Conntrack-based sampling for MVP (eBPF is a possible v2).
       solrn-dev — see "Known limitations" below.
 - [x] **M3** — UI: live Sankey/chord diagram of $ flow between AZs + top-offenders table
       (namespace/workload breakdown). Static SPA (D3.js from CDN, no build step), served by the
-      collector via Go embed.FS at "/", polling /api/v1/costs + /api/v1/top every 10s. Two real
-      bugs found by the user reviewing the live dashboard and fixed same-day: (1) cost math only
-      counted AWS's per-direction rate, undercounting real AWS bills by 2x since cross-AZ GB is
-      billed at both ends; (2) the zone-only Sankey graph crashed ("circular link") on
-      bidirectional zone traffic, a common case, and that one uncaught exception silently blanked
-      the whole page including the offenders table. Fixed by switching to a workload -> src-zone
-      -> dst-zone 3-column DAG (structurally acyclic) — which also doubles as the "service map"
-      view (which workload drives which flow) the user asked for — plus isolating each UI section
-      in its own try/catch so one render failure can't take down the rest of the page.
+      collector via Go embed.FS at "/", polling /api/v1/costs + /api/v1/top every 10s. Iterated
+      twice on real user feedback against the live solrn-dev dashboard:
+      1. Two real bugs: cost math only counted AWS's per-direction rate (2x undercounted vs the
+         real bill, since cross-AZ GB is billed at both ends); the zone-only Sankey graph crashed
+         ("circular link") on bidirectional zone traffic, a common case, silently blanking the
+         whole page. Fixed with a workload->src-zone->dst-zone 3-column DAG + per-section
+         try/catch isolation.
+      2. The 3-column DAG became unreadable once one workload's cost ($218) dwarfed the rest
+         ($0.0001 range) — dozens of overlapping unreadable labels. Replaced with a compact
+         fixed-layout node-link zone map (nodes = AZs, curved directed edges = cost flows,
+         red->green color scale by relative cost, sqrt-scaled edge width so the dominant flow
+         doesn't crush the rest) plus a workload filter dropdown (the "service map" need is now
+         served by filtering, not by cramming every workload into the diagram) and a
+         red/green cost color on the offenders table too.
 - [ ] **M4** — Alerting: Slack webhook on $/hour threshold breach.
 - [ ] **M5** — CLI (`zonetax top`, `zonetax report --since 1h`) hitting the collector API.
 - [ ] **M6** — Polish: multi-arch CI images, demo GIF against a real multi-AZ EKS cluster,
