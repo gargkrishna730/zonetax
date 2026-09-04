@@ -10,10 +10,10 @@ Scope: AWS/EKS first. Conntrack-based sampling for MVP (eBPF is a possible v2).
 - [x] **M2** — Cost engine: versioned AWS pricing table (YAML), collector aggregates AZ-pair bytes
       into $ cost, REST API to query current/historical spend. Deployed and validated live against
       solrn-dev — see "Known limitations" below.
-- [x] **M3** — UI: live Sankey/chord diagram of $ flow between AZs + top-offenders table
-      (namespace/workload breakdown). Static SPA (D3.js from CDN, no build step), served by the
-      collector via Go embed.FS at "/", polling /api/v1/costs + /api/v1/top every 10s. Iterated
-      four times on real user feedback against the live solrn-dev dashboard:
+- [x] **M3** — UI: interactive zone-to-zone traffic map + top-offenders table (namespace/workload
+      breakdown). Served by the collector via Go embed.FS at "/", polling /api/v1/costs +
+      /api/v1/top every 10s. Iterated five times on real user feedback against the live
+      solrn-dev dashboard:
       1. Two real bugs: cost math only counted AWS's per-direction rate (2x undercounted vs the
          real bill, since cross-AZ GB is billed at both ends); the zone-only Sankey graph crashed
          ("circular link") on bidirectional zone traffic, a common case, silently blanking the
@@ -28,17 +28,31 @@ Scope: AWS/EKS first. Conntrack-based sampling for MVP (eBPF is a possible v2).
          workload lives in.
       4. User pointed at a real APM service-map screenshot (boxes + directed labeled arrows,
          source->destination) and asked for that shape directly. Rebuilt as a static zone-to-zone
-         flow diagram: nodes are zones only (placed on a closed-form circle/row layout, no
-         physics — nothing to converge badly or jump between renders), directed curved edges are
-         the real source-zone->destination-zone cost aggregate (the actual AWS billing
-         dimension), each edge has a $-cost pill label and arrowhead colored red->green by
-         relative cost, hover shows the top contributing workloads per route. The workload
-         filter now recomputes this same zone-to-zone diagram scoped to just that workload's
-         traffic, answering "where does this workload's data actually go" directly. Verified
-         geometry (no NaN, correct directional separation of forward/reverse routes, correct
-         behavior when filtered to a single workload, correct empty-state when a workload has
-         no cross-AZ traffic) against live cluster data via a headless Node harness before
-         shipping.
+         flow diagram (still plain D3/SVG): nodes are zones only, no physics, directed curved
+         edges are the real source-zone->destination-zone cost aggregate, each with a $-cost pill
+         and hover breakdown by contributing workload.
+      5. Correctly right in *what* it showed, but user called out (with a real APM tool
+         screenshot for comparison) that hand-rolled SVG could never deliver proper drag/zoom
+         interactivity, and pushed to invest in a real frontend stack instead of another SVG
+         patch. Rewrote the whole dashboard as a React + TypeScript SPA (Vite) using
+         **@xyflow/react (React Flow)** for the graph: zones are custom draggable nodes, routes
+         are custom "floating" edges (dynamically re-anchoring to whichever box side faces the
+         other node, so dragging never visually detaches an edge) with cost-pill labels and
+         hover tooltips, native pinch/scroll zoom and pan. This retired three iterations' worth
+         of hand-rolled drag/zoom/curve-geometry bugs by delegating that problem to a
+         purpose-built graph library instead of re-solving it a fourth time. Frontend source
+         lives in ui/app/; the collector's Dockerfile now has a Node build stage that runs
+         `npm run build` before the Go build embeds ui/dist via go:embed (dist/node_modules are
+         gitignored, never committed, to prevent drift from source); CI's build-test job builds
+         the UI before `go build ./...` for the same reason. Verified with a real headless
+         Chromium (Playwright, driven manually since the browser tool can't reach localhost)
+         against the live solrn-dev collector via a Vite dev-server API proxy: confirmed actual
+         node drag (caught and fixed two real bugs this way — hidden connection Handles were
+         still catching pointer events and stealing drag gestures; nodes were plain memoized
+         props with no onNodesChange wiring, so ReactFlow silently ignored drag output entirely),
+         confirmed scroll-to-zoom changes the viewport transform, confirmed the workload filter
+         correctly recomputes to just that workload's real routes, and confirmed the edge hover
+         tooltip renders the correct per-workload cost breakdown.
 - [ ] **M4** — Alerting: Slack webhook on $/hour threshold breach.
 - [ ] **M5** — CLI (`zonetax top`, `zonetax report --since 1h`) hitting the collector API.
 - [ ] **M6** — Polish: multi-arch CI images, demo GIF against a real multi-AZ EKS cluster,

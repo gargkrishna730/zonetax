@@ -11,6 +11,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/app/package-lock.json
+      - name: Build UI (embedded by cmd/collector via go:embed)
+        working-directory: ui/app
+        run: |
+          npm ci
+          npm run build
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
