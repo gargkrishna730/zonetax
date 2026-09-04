@@ -29,17 +29,28 @@ type ViewMode = 'zone' | 'workload'
  * no force simulation. This is a closed-form function of (index, count), so it can never
  * converge badly, jump between renders, or produce NaN positions; it's also directly testable
  * with pure geometry, unlike a physics sim. The user can still drag nodes anywhere afterward —
- * ReactFlow persists that position in its own node state — this is just the initial layout. */
+ * ReactFlow persists that position in its own node state — this is just the initial layout.
+ *
+ * The circle's radius and the virtual canvas it's drawn on both grow with node count (rather
+ * than staying fixed at whatever fit 3 zones) — the workload view can easily have a dozen-plus
+ * nodes, and a fixed-radius circle at that count visibly overlapped boxes in testing.
+ * ReactFlow's fitView then zooms/pans the actual viewport to fit whatever this returns, so a
+ * bigger virtual canvas here doesn't shrink anything on screen — it just gives crowded layouts
+ * room to spread out before fitView frames them. */
 function initialNodePosition(index: number, total: number): { x: number; y: number } {
-  const width = 900
-  const height = 520
+  const boxWidth = 190 // approx rendered width of a flow-box-node, incl. padding — used to
+  // pick a radius that keeps adjacent boxes from visually overlapping as count grows.
   if (total <= 2) {
+    const width = 900
     const x = total === 1 ? width / 2 : index === 0 ? width * 0.25 : width * 0.75
-    return { x, y: height / 2 }
+    return { x, y: 260 }
   }
-  const cx = width / 2
-  const cy = height / 2
-  const r = Math.min(width, height) / 2 - 90
+  // Circumference needed for `total` boxes side-by-side, plus headroom, converted back to a
+  // radius; floored at a sane minimum so small counts (3-4) don't get an unnecessarily tiny
+  // circle.
+  const r = Math.max(230, (total * boxWidth * 1.15) / (2 * Math.PI))
+  const cx = r + 160
+  const cy = r + 120
   const angle = -Math.PI / 2 + index * ((2 * Math.PI) / total)
   return { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) }
 }
