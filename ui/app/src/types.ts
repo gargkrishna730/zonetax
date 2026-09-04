@@ -5,6 +5,10 @@ export interface CostEntry {
   dst_zone: string
   src_namespace: string
   src_workload: string
+  // dst_namespace/dst_workload identify the destination pod's owning workload — the actual
+  // "which workload is this traffic going TO" the zone-only view couldn't answer.
+  dst_namespace: string
+  dst_workload: string
   gb: number
   cost_usd: number
 }

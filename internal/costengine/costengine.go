@@ -27,12 +27,16 @@ const (
 )
 
 // Entry is one costed cross-AZ traffic bucket: bytes observed between two zones, attributed to
-// the source namespace/workload, with the resulting dollar cost applied.
+// the source namespace/workload, with the resulting dollar cost applied. DstNamespace/DstWorkload
+// identify the destination workload the traffic went to, enabling a workload-to-workload flow
+// view in addition to the zone-to-zone one.
 type Entry struct {
 	SrcZone      string  `json:"src_zone"`
 	DstZone      string  `json:"dst_zone"`
 	SrcNamespace string  `json:"src_namespace"`
 	SrcWorkload  string  `json:"src_workload"`
+	DstNamespace string  `json:"dst_namespace"`
+	DstWorkload  string  `json:"dst_workload"`
 	Bytes        float64 `json:"bytes"`
 	GB           float64 `json:"gb"`
 	CostUSD      float64 `json:"cost_usd"`
@@ -86,6 +90,8 @@ func Compute(families map[string]*dto.MetricFamily, table *pricing.Table, cloud,
 				DstZone:      labels["dst_zone"],
 				SrcNamespace: labels["src_namespace"],
 				SrcWorkload:  labels["src_workload"],
+				DstNamespace: labels["dst_namespace"],
+				DstWorkload:  labels["dst_workload"],
 				Bytes:        bytes,
 				GB:           gb,
 				CostUSD:      cost,

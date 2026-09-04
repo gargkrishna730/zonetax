@@ -53,6 +53,45 @@ main {
 .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin: 0; font-weight: 600; }
 .flow-card { grid-row: span 2; }
 .flow-summary { font-size: 12px; color: var(--text-dim); margin: 2px 0 10px; }
+.head-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.view-toggle {
+  display: inline-flex;
+  background: #0e1219;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+.view-toggle button {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.view-toggle button:hover { color: var(--text); }
+.view-toggle button.active { background: var(--panel-border); color: var(--text); font-weight: 600; }
+
+.collapse-btn {
+  background: #0e1219;
+  color: var(--text-dim);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.collapse-btn:hover { color: var(--text); border-color: #3a4256; }
+
+/* Collapsing "Top offenders" hands its grid column back to the flow map, matching the "it is
+   taking more screen" complaint — a hidden panel should free up room, not leave a blank gap. */
+.offenders-card.collapsed { padding-bottom: 12px; }
+main.offenders-collapsed { grid-template-columns: 1fr; }
+main.offenders-collapsed .flow-card { grid-row: auto; }
+main.offenders-collapsed .offenders-card { grid-column: 1 / -1; }
 
 select {
   background: #0e1219; color: var(--text); border: 1px solid var(--panel-border);
@@ -87,7 +126,7 @@ select {
 .react-flow__minimap { border-radius: 8px; border: 1px solid var(--panel-border); }
 .react-flow__attribution { display: none; }
 
-.zone-node {
+.flow-box-node {
   background: #171c28;
   border: 1.5px solid rgba(255,255,255,0.25);
   border-radius: 10px;
@@ -96,10 +135,9 @@ select {
   text-align: center;
   cursor: grab;
 }
-.zone-node:active { cursor: grabbing; }
-.zone-node-touched { border-color: rgba(255,255,255,0.35); }
-.zone-node-label { font-size: 14px; font-weight: 700; color: var(--text); }
-.zone-node-sub { font-size: 10.5px; color: var(--text-dim); margin-top: 3px; }
+.flow-box-node:active { cursor: grabbing; }
+.flow-box-label { font-size: 14px; font-weight: 700; color: var(--text); }
+.flow-box-sublabel { font-size: 10.5px; color: var(--text-dim); margin-top: 3px; }
 
 .edge-pill {
   position: absolute;

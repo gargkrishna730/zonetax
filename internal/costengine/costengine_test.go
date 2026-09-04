@@ -40,6 +40,7 @@ func TestCompute_PricesCrossAZTraffic(t *testing.T) {
 				counterMetric(map[string]string{
 					"src_zone": "us-east-1a", "dst_zone": "us-east-1b",
 					"src_namespace": "prod", "src_workload": "web",
+					"dst_namespace": "prod", "dst_workload": "db",
 				}, 1e9), // exactly 1 GB
 			},
 		},
@@ -63,7 +64,10 @@ func TestCompute_PricesCrossAZTraffic(t *testing.T) {
 		t.Errorf("TotalCrossAZCost = %v, want 0.02", summary.TotalCrossAZCost)
 	}
 	if e.SrcWorkload != "web" || e.SrcNamespace != "prod" {
-		t.Errorf("attribution = %s/%s, want prod/web", e.SrcNamespace, e.SrcWorkload)
+		t.Errorf("source attribution = %s/%s, want prod/web", e.SrcNamespace, e.SrcWorkload)
+	}
+	if e.DstWorkload != "db" || e.DstNamespace != "prod" {
+		t.Errorf("destination attribution = %s/%s, want prod/db", e.DstNamespace, e.DstWorkload)
 	}
 }
 

@@ -57,7 +57,10 @@ func TestAggregate_CrossAZTrafficSummed(t *testing.T) {
 		t.Errorf("zones = %s -> %s, want us-east-1a -> us-east-1b", r.SrcZone, r.DstZone)
 	}
 	if r.SrcNamespace != "prod" || r.SrcWorkload != "web" {
-		t.Errorf("attribution = %s/%s, want prod/web", r.SrcNamespace, r.SrcWorkload)
+		t.Errorf("source attribution = %s/%s, want prod/web", r.SrcNamespace, r.SrcWorkload)
+	}
+	if r.DstNamespace != "prod" || r.DstWorkload != "db" {
+		t.Errorf("destination attribution = %s/%s, want prod/db", r.DstNamespace, r.DstWorkload)
 	}
 }
 

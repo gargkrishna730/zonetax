@@ -4,18 +4,24 @@ package metrics
 
 import "github.com/prometheus/client_golang/prometheus"
 
-// CrossAZBytesTotal counts bytes transferred, labeled by source/destination AZ and the source
-// namespace/workload responsible. It's a Counter (monotonically increasing) because conntrack
-// byte counters are cumulative per-connection; the collector computes rates via Prometheus
-// `rate()`/`increase()` rather than the agent trying to compute deltas itself.
+// CrossAZBytesTotal counts bytes transferred, labeled by source/destination AZ and the
+// source/destination namespace/workload responsible. It's a Counter (monotonically increasing)
+// because conntrack byte counters are cumulative per-connection; the collector computes rates
+// via Prometheus `rate()`/`increase()` rather than the agent trying to compute deltas itself.
+//
+// Destination labels (dst_namespace/dst_workload) enable a workload-to-workload flow view, not
+// just zone-to-zone. This does multiply the metric's cardinality by however many distinct
+// destination workloads exist — acceptable here since Kubernetes clusters have a bounded,
+// modest number of workloads (tens to low hundreds), unlike per-pod or per-connection labels
+// which would be unbounded.
 var CrossAZBytesTotal = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Namespace: "zonetax",
 		Subsystem: "agent",
 		Name:      "cross_az_bytes_total",
-		Help:      "Cumulative bytes transferred between availability zones, by source/destination zone and originating namespace/workload.",
+		Help:      "Cumulative bytes transferred between availability zones, by source/destination zone and source/destination namespace/workload.",
 	},
-	[]string{"src_zone", "dst_zone", "src_namespace", "src_workload"},
+	[]string{"src_zone", "dst_zone", "src_namespace", "src_workload", "dst_namespace", "dst_workload"},
 )
 
 // SameAZBytesTotal is the same breakdown for same-zone (non-billable) traffic, kept separate so

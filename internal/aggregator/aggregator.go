@@ -14,13 +14,22 @@ import (
 type ResolveFunc func(ip string) (podindex.PodInfo, azmap.NodeInfo, bool)
 
 // Key identifies one aggregation bucket: traffic from one AZ to another, broken down by the
-// source namespace/workload responsible for it. Same-AZ traffic (SrcZone == DstZone) is also
-// tracked so totals/ratios can be reported, but only cross-AZ buckets are billed.
+// source namespace/workload responsible for it and the destination namespace/workload it went
+// to. Same-AZ traffic (SrcZone == DstZone) is also tracked so totals/ratios can be reported, but
+// only cross-AZ buckets are billed.
 type Key struct {
 	SrcZone      string
 	DstZone      string
 	SrcNamespace string
 	SrcWorkload  string
+	// DstNamespace/DstWorkload identify the destination pod's owning workload (falling back to
+	// the pod name for bare/unowned pods — see podindex.PodInfo.Workload), enabling a
+	// workload-to-workload flow view in addition to the zone-to-zone one. Pod names themselves
+	// are intentionally NOT tracked here: pods are ephemeral (rescheduled, restarted) and would
+	// churn the aggregation key constantly, fragmenting cost attribution across pod generations
+	// instead of the stable owning workload.
+	DstNamespace string
+	DstWorkload  string
 }
 
 // CrossAZ reports whether this bucket represents billable cross-AZ traffic.
@@ -55,7 +64,7 @@ func Aggregate(flows []conntrack.Flow, resolve ResolveFunc) AggregateOutput {
 
 	for _, f := range flows {
 		srcPod, srcNode, srcOK := resolve(f.OrigSrcIP)
-		_, dstNode, dstOK := resolve(f.OrigDstIP)
+		dstPod, dstNode, dstOK := resolve(f.OrigDstIP)
 		if !srcOK || !dstOK {
 			unresolved++
 			continue
@@ -71,6 +80,8 @@ func Aggregate(flows []conntrack.Flow, resolve ResolveFunc) AggregateOutput {
 			DstZone:      dstNode.Zone,
 			SrcNamespace: srcPod.Namespace,
 			SrcWorkload:  srcPod.Workload,
+			DstNamespace: dstPod.Namespace,
+			DstWorkload:  dstPod.Workload,
 		}
 		totals[key] += bytes
 	}

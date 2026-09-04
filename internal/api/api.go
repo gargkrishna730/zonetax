@@ -36,6 +36,8 @@ type entry struct {
 	DstZone      string  `json:"dst_zone"`
 	SrcNamespace string  `json:"src_namespace"`
 	SrcWorkload  string  `json:"src_workload"`
+	DstNamespace string  `json:"dst_namespace"`
+	DstWorkload  string  `json:"dst_workload"`
 	GB           float64 `json:"gb"`
 	CostUSD      float64 `json:"cost_usd"`
 }
@@ -83,6 +85,7 @@ func toEntries(src []costengine.Entry) []entry {
 		out = append(out, entry{
 			SrcZone: e.SrcZone, DstZone: e.DstZone,
 			SrcNamespace: e.SrcNamespace, SrcWorkload: e.SrcWorkload,
+			DstNamespace: e.DstNamespace, DstWorkload: e.DstWorkload,
 			GB: e.GB, CostUSD: e.CostUSD,
 		})
 	}

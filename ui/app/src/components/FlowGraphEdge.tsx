@@ -9,25 +9,29 @@ import {
 } from '@xyflow/react'
 import { getFloatingEdgeParams } from '../floatingEdgeUtils'
 import { fmtGB, fmtUSD, fmtUSDShort } from '../format'
-import type { ZonePairFlow } from '../zoneFlow'
+import type { FlowPair } from '../flowGraph'
+import type { FlowBoxNode } from './FlowBoxNode'
 
-export type ZoneEdgeData = {
-  pair: ZonePairFlow
+export type FlowGraphEdgeData = {
+  pair: FlowPair
   color: string
   widthPx: number
+  /** "Route" for the zone view (labels a workload breakdown), "Zone route" for the workload
+   * view (labels a zone-pair breakdown) — keeps the hover tooltip's terminology correct for
+   * whichever view is active instead of always saying one or the other. */
+  breakdownHeading: string
 }
 
-export type ZoneEdge = Edge<ZoneEdgeData, 'zoneFlow'>
+export type FlowGraphEdge = Edge<FlowGraphEdgeData, 'flowGraph'>
 
-/** A "floating" edge (attaches to whichever side of each zone box currently faces the other
- * box, recomputed live as nodes are dragged — see floatingEdgeUtils.ts) drawn as a curved
- * bezier with an arrowhead, a $-cost pill at its midpoint, and a hover tooltip breaking the
- * route down by contributing workload. This is the direct replacement for the earlier
- * hand-rolled SVG path math — ReactFlow handles the attach-point/redraw-on-drag bookkeeping
- * that was previously reimplemented by hand across three prior iterations. */
-export function ZoneFlowEdge({ id, source, target, data, markerEnd }: EdgeProps<ZoneEdge>) {
-  const sourceNode = useInternalNode(source)
-  const targetNode = useInternalNode(target)
+/** A "floating" edge (attaches to whichever side of each box currently faces the other node,
+ * recomputed live as nodes are dragged — see floatingEdgeUtils.ts) drawn as a curved bezier with
+ * an arrowhead, a $-cost pill at its midpoint, and a hover tooltip breaking the route down by
+ * contributing sub-item (workload for the zone view, zone-route for the workload view). Shared
+ * by both views so drag/zoom/tooltip behavior can't drift between them. */
+export function FlowGraphEdge({ id, source, target, data, markerEnd }: EdgeProps<FlowGraphEdge>) {
+  const sourceNode = useInternalNode<FlowBoxNode>(source)
+  const targetNode = useInternalNode<FlowBoxNode>(target)
   const [hovered, setHovered] = useState(false)
 
   const showTooltip = useCallback(() => setHovered(true), [])
@@ -46,8 +50,8 @@ export function ZoneFlowEdge({ id, source, target, data, markerEnd }: EdgeProps<
     curvature: 0.35,
   })
 
-  const { pair, color, widthPx } = data
-  const topWorkloads = Array.from(pair.workloads.values())
+  const { pair, color, widthPx, breakdownHeading } = data
+  const topBreakdown = Array.from(pair.breakdown.values())
     .sort((a, b) => b.cost - a.cost)
     .slice(0, 5)
 
@@ -88,7 +92,7 @@ export function ZoneFlowEdge({ id, source, target, data, markerEnd }: EdgeProps<
             style={{ transform: `translate(-50%, 12px) translate(${labelX}px, ${labelY}px)` }}
           >
             <div className="tt-title">
-              {pair.src} → {pair.dst}
+              {sourceNode.data.label} → {targetNode.data.label}
             </div>
             <div className="tt-row">
               <span>Total cost</span>
@@ -98,11 +102,11 @@ export function ZoneFlowEdge({ id, source, target, data, markerEnd }: EdgeProps<
               <span>Traffic</span>
               <b>{fmtGB(pair.gb)}</b>
             </div>
-            <div className="tt-subhead">Top workloads</div>
-            {topWorkloads.map((w) => (
-              <div className="tt-row" key={w.label}>
-                <span>{w.label}</span>
-                <b>{fmtUSD(w.cost)}</b>
+            <div className="tt-subhead">{breakdownHeading}</div>
+            {topBreakdown.map((b) => (
+              <div className="tt-row" key={b.label}>
+                <span>{b.label}</span>
+                <b>{fmtUSD(b.cost)}</b>
               </div>
             ))}
           </div>

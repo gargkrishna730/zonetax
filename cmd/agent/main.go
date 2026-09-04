@@ -143,7 +143,7 @@ func sampleOnce(store *podindex.Store) error {
 
 	for _, r := range out.Results {
 		if r.CrossAZ() {
-			metrics.CrossAZBytesTotal.WithLabelValues(r.SrcZone, r.DstZone, r.SrcNamespace, r.SrcWorkload).Add(float64(r.Bytes))
+			metrics.CrossAZBytesTotal.WithLabelValues(r.SrcZone, r.DstZone, r.SrcNamespace, r.SrcWorkload, r.DstNamespace, r.DstWorkload).Add(float64(r.Bytes))
 		} else {
 			metrics.SameAZBytesTotal.WithLabelValues(r.SrcZone, r.SrcNamespace, r.SrcWorkload).Add(float64(r.Bytes))
 		}
