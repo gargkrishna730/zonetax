@@ -15,10 +15,19 @@ import '@xyflow/react/dist/style.css'
 import './dashboard.css'
 
 import type { CostsResponse, CostEntry } from './types'
-import { buildZoneFlow, buildWorkloadFlow, srcWorkloadKey, type FlowGraph } from './flowGraph'
+import {
+  buildZoneFlow,
+  buildWorkloadFlow,
+  buildWorkloadPairBreakdown,
+  srcWorkloadKey,
+  dstWorkloadKey,
+  type FlowGraph,
+  type WorkloadPairBreakdown,
+} from './flowGraph'
 import { costColor, fmtAgo, fmtGB, fmtUSD } from './format'
 import { FlowBoxNode, type FlowBoxNodeData } from './components/FlowBoxNode'
 import { FlowGraphEdge, type FlowGraphEdgeData } from './components/FlowGraphEdge'
+import { EdgeDrillDownPanel, type DrillDownSelection } from './components/EdgeDrillDownPanel'
 
 const POLL_MS = 10_000
 
@@ -88,6 +97,16 @@ export default function App() {
   const [filterKey, setFilterKey] = useState<string>('')
   const [viewMode, setViewMode] = useState<ViewMode>('zone')
   const [offendersCollapsed, setOffendersCollapsed] = useState(false)
+  // Set by clicking a row in the edge drill-down panel — narrows the view to exactly this one
+  // (source workload, destination workload) pair rather than "all traffic from this source
+  // workload" (the coarser `filterKey` above). This is what makes "click zone A->B, click one
+  // workload pair, see just that pair in Workload -> Workload" actually land on a single edge
+  // instead of that workload's traffic to every zone it happens to talk to.
+  const [pairFilter, setPairFilter] = useState<{ srcKey: string; dstKey: string; srcLabel: string; dstLabel: string } | null>(null)
+  // The currently-open drill-down panel, or null when closed. Selecting an edge in the zone
+  // view populates this with every real workload pair behind that route (see
+  // buildWorkloadPairBreakdown) rather than the hover tooltip's capped top-5.
+  const [drillDown, setDrillDown] = useState<DrillDownSelection | null>(null)
   // Node positions persist across data refreshes AND across switching view mode back and forth
   // (keyed by "viewMode:nodeId" so a zone id and a workload id can never collide) so a user's
   // drag isn't undone by the next 10s poll or by toggling views.
@@ -129,8 +148,12 @@ export default function App() {
   }, [positiveEntries])
 
   const scopedEntries = useMemo(
-    () => positiveEntries.filter((e) => !filterKey || srcWorkloadKey(e) === filterKey),
-    [positiveEntries, filterKey],
+    () =>
+      positiveEntries.filter((e) => {
+        if (pairFilter) return srcWorkloadKey(e) === pairFilter.srcKey && dstWorkloadKey(e) === pairFilter.dstKey
+        return !filterKey || srcWorkloadKey(e) === filterKey
+      }),
+    [positiveEntries, filterKey, pairFilter],
   )
 
   const flowGraph: FlowGraph = useMemo(
@@ -173,13 +196,29 @@ export default function App() {
       const color = costColor(pair.cost, flowGraph.maxPairCost)
       const widthPx = Math.max(1.5, Math.min(7, 1.5 + 5.5 * Math.sqrt(pair.cost / (flowGraph.maxPairCost || 1))))
       const marker: EdgeMarker = { type: MarkerType.ArrowClosed, color, width: 22, height: 22 }
+      const srcNode = flowGraph.nodes.find((n) => n.id === pair.srcId)
+      const dstNode = flowGraph.nodes.find((n) => n.id === pair.dstId)
+      // Drilling down only makes sense in the zone view — a workload-view edge is already the
+      // single most granular thing (one workload pair), there's nothing further to break it
+      // into.
+      const onSelect =
+        viewMode === 'zone'
+          ? () =>
+              setDrillDown({
+                srcLabel: srcNode?.label ?? pair.srcId,
+                dstLabel: dstNode?.label ?? pair.dstId,
+                totalCost: pair.cost,
+                totalGb: pair.gb,
+                pairs: buildWorkloadPairBreakdown(pair.entries),
+              })
+          : undefined
       return {
         id: `${pair.srcId}>${pair.dstId}`,
         source: pair.srcId,
         target: pair.dstId,
         type: 'flowGraph' as const,
         markerEnd: marker,
-        data: { pair, color, widthPx, breakdownHeading } satisfies FlowGraphEdgeData,
+        data: { pair, color, widthPx, breakdownHeading, onSelect } satisfies FlowGraphEdgeData,
       }
     })
   }, [flowGraph, viewMode])
@@ -266,7 +305,10 @@ export default function App() {
                 <button
                   type="button"
                   className={viewMode === 'zone' ? 'active' : ''}
-                  onClick={() => setViewMode('zone')}
+                  onClick={() => {
+                    setViewMode('zone')
+                    setPairFilter(null)
+                  }}
                   role="tab"
                   aria-selected={viewMode === 'zone'}
                 >
@@ -275,21 +317,41 @@ export default function App() {
                 <button
                   type="button"
                   className={viewMode === 'workload' ? 'active' : ''}
-                  onClick={() => setViewMode('workload')}
+                  onClick={() => {
+                    setViewMode('workload')
+                    setPairFilter(null)
+                  }}
                   role="tab"
                   aria-selected={viewMode === 'workload'}
                 >
                   Workload → Workload
                 </button>
               </div>
-              <select value={filterKey} onChange={(e) => setFilterKey(e.target.value)}>
-                <option value="">All workloads</option>
-                {workloadOptions.map(([key, v]) => (
-                  <option key={key} value={key}>
-                    {v.label} — {fmtUSD(v.cost)}
-                  </option>
-                ))}
-              </select>
+              {pairFilter ? (
+                <div className="pair-filter-chip">
+                  <span>
+                    {pairFilter.srcLabel} → {pairFilter.dstLabel}
+                  </span>
+                  <button type="button" onClick={() => setPairFilter(null)} aria-label="Clear pair filter">
+                    ×
+                  </button>
+                </div>
+              ) : (
+                <select
+                  value={filterKey}
+                  onChange={(e) => {
+                    setFilterKey(e.target.value)
+                    setPairFilter(null)
+                  }}
+                >
+                  <option value="">All workloads</option>
+                  {workloadOptions.map(([key, v]) => (
+                    <option key={key} value={key}>
+                      {v.label} — {fmtUSD(v.cost)}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
           </div>
           <div className="flow-summary">
@@ -333,6 +395,22 @@ export default function App() {
                   <RefitOnViewChange viewMode={viewMode} nodeCount={nodes.length} />
                 </ReactFlow>
               </ReactFlowProvider>
+            )}
+            {drillDown && (
+              <EdgeDrillDownPanel
+                selection={drillDown}
+                onClose={() => setDrillDown(null)}
+                onSelectPair={(p: WorkloadPairBreakdown) => {
+                  // Pivots into the existing Workload -> Workload view, scoped to exactly this
+                  // one pair via pairFilter (not the coarser single-workload filterKey) — this
+                  // is the "click a workload pair, see just that pair" flow, reusing the view
+                  // that's already built rather than inventing a third diagram just for this.
+                  setPairFilter({ srcKey: p.srcKey, dstKey: p.dstKey, srcLabel: p.srcLabel, dstLabel: p.dstLabel })
+                  setFilterKey('')
+                  setViewMode('workload')
+                  setDrillDown(null)
+                }}
+              />
             )}
           </div>
         </div>

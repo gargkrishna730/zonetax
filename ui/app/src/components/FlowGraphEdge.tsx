@@ -20,6 +20,11 @@ export type FlowGraphEdgeData = {
    * view (labels a zone-pair breakdown) — keeps the hover tooltip's terminology correct for
    * whichever view is active instead of always saying one or the other. */
   breakdownHeading: string
+  /** Opens the persistent drill-down panel for this edge — a hover tooltip alone can't hold a
+   * full, sortable, click-through-able list, and caps at "top 5" which isn't enough for a real
+   * investigation. Undefined when there's nothing further to drill into (e.g. already at the
+   * most granular workload-to-workload view). */
+  onSelect?: () => void
 }
 
 export type FlowGraphEdge = Edge<FlowGraphEdgeData, 'flowGraph'>
@@ -50,10 +55,11 @@ export function FlowGraphEdge({ id, source, target, data, markerEnd }: EdgeProps
     curvature: 0.35,
   })
 
-  const { pair, color, widthPx, breakdownHeading } = data
+  const { pair, color, widthPx, breakdownHeading, onSelect } = data
   const topBreakdown = Array.from(pair.breakdown.values())
     .sort((a, b) => b.cost - a.cost)
     .slice(0, 5)
+  const moreCount = pair.breakdown.size - topBreakdown.length
 
   return (
     <>
@@ -61,10 +67,10 @@ export function FlowGraphEdge({ id, source, target, data, markerEnd }: EdgeProps
         id={id}
         path={edgePath}
         markerEnd={markerEnd}
-        style={{ stroke: color, strokeWidth: widthPx, cursor: 'pointer' }}
+        style={{ stroke: color, strokeWidth: widthPx, cursor: onSelect ? 'pointer' : 'default' }}
       />
-      {/* Wide invisible hit-path so thin, low-cost edges are still easy to hover — a thin
-          visible stroke is bad UX to hover precisely, especially once zoomed out. */}
+      {/* Wide invisible hit-path so thin, low-cost edges are still easy to hover/click — a thin
+          visible stroke is bad UX to target precisely, especially once zoomed out. */}
       <path
         d={edgePath}
         fill="none"
@@ -72,7 +78,8 @@ export function FlowGraphEdge({ id, source, target, data, markerEnd }: EdgeProps
         strokeWidth={18}
         onMouseEnter={showTooltip}
         onMouseLeave={hideTooltip}
-        style={{ cursor: 'pointer' }}
+        onClick={onSelect}
+        style={{ cursor: onSelect ? 'pointer' : 'default' }}
       />
       <EdgeLabelRenderer>
         <div
@@ -80,9 +87,11 @@ export function FlowGraphEdge({ id, source, target, data, markerEnd }: EdgeProps
           style={{
             transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
             background: color,
+            cursor: onSelect ? 'pointer' : 'default',
           }}
           onMouseEnter={showTooltip}
           onMouseLeave={hideTooltip}
+          onClick={onSelect}
         >
           {fmtUSDShort(pair.cost)}
         </div>
@@ -109,6 +118,11 @@ export function FlowGraphEdge({ id, source, target, data, markerEnd }: EdgeProps
                 <b>{fmtUSD(b.cost)}</b>
               </div>
             ))}
+            {onSelect && (
+              <div className="tt-clickhint">
+                {moreCount > 0 ? `+${moreCount} more · ` : ''}Click for full breakdown →
+              </div>
+            )}
           </div>
         )}
       </EdgeLabelRenderer>

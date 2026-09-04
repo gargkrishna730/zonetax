@@ -24,13 +24,53 @@ export interface FlowNode {
 /** One directed edge between two FlowNodes, aggregated from every raw CostEntry that shares the
  * same (source, destination) pair. `breakdown` holds a human-readable detail list shown on
  * hover — contributing workloads for the zone view, contributing zone-routes for the workload
- * view — so the two views stay complementary instead of duplicating the same information. */
+ * view — so the two views stay complementary instead of duplicating the same information.
+ * `entries` keeps the raw CostEntry rows this pair was built from, so a UI can drill further
+ * into e.g. "which workload in zone A talked to which workload in zone B" on click, without
+ * re-deriving that from the full entry list and a src/dst zone filter every time. */
 export interface FlowPair {
   srcId: string
   dstId: string
   cost: number
   gb: number
   breakdown: Map<string, { label: string; cost: number }>
+  entries: CostEntry[]
+}
+
+/** Aggregates a set of raw cost entries (e.g. everything behind one zone-to-zone edge) into the
+ * real source-workload -> destination-workload pairs that make it up, sorted by cost. This is
+ * the data behind the flow-map's edge drill-down panel: clicking a zone route should show every
+ * actual workload pair responsible for it, not just a capped "top 5" hover list — an SRE
+ * investigating a cost spike needs the complete picture, and it needs to be something they can
+ * click into, not a tooltip that vanishes the moment the mouse moves. */
+export interface WorkloadPairBreakdown {
+  srcKey: string
+  srcLabel: string
+  dstKey: string
+  dstLabel: string
+  cost: number
+  gb: number
+}
+
+export function buildWorkloadPairBreakdown(entries: CostEntry[]): WorkloadPairBreakdown[] {
+  const totals = new Map<string, WorkloadPairBreakdown>()
+  for (const e of entries) {
+    const srcKey = srcWorkloadKey(e)
+    const dstKey = dstWorkloadKey(e)
+    const key = srcKey + '>' + dstKey
+    const cur = totals.get(key) || {
+      srcKey,
+      srcLabel: e.src_workload || '(unknown)',
+      dstKey,
+      dstLabel: e.dst_workload || '(unknown)',
+      cost: 0,
+      gb: 0,
+    }
+    cur.cost += e.cost_usd
+    cur.gb += e.gb
+    totals.set(key, cur)
+  }
+  return Array.from(totals.values()).sort((a, b) => b.cost - a.cost)
 }
 
 export interface FlowGraph {
@@ -67,11 +107,12 @@ function buildFlowGraph(
     const key = srcId + '>' + dstId
     let cur = pairTotals.get(key)
     if (!cur) {
-      cur = { srcId, dstId, cost: 0, gb: 0, breakdown: new Map() }
+      cur = { srcId, dstId, cost: 0, gb: 0, breakdown: new Map(), entries: [] }
       pairTotals.set(key, cur)
     }
     cur.cost += e.cost_usd
     cur.gb += e.gb
+    cur.entries.push(e)
     const bKey = breakdownKey(e)
     const b = cur.breakdown.get(bKey) || { label: breakdownLabel(e), cost: 0 }
     b.cost += e.cost_usd
