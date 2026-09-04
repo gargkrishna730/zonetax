@@ -20,6 +20,7 @@ import (
 
 	"github.com/gargkrishna730/zonetax/internal/aggregator"
 	"github.com/gargkrishna730/zonetax/internal/conntrack"
+	"github.com/gargkrishna730/zonetax/internal/deltatrack"
 	"github.com/gargkrishna730/zonetax/internal/metrics"
 	"github.com/gargkrishna730/zonetax/internal/podindex"
 )
@@ -104,24 +105,30 @@ func buildPodIndex(ctx context.Context) (*podindex.Store, error) {
 }
 
 // runSampleLoop periodically reads conntrack, aggregates flows by AZ pair, and records results
-// into the Prometheus metrics. Runs until ctx is cancelled.
+// into the Prometheus metrics. Runs until ctx is cancelled. A single *deltatrack.Tracker is
+// shared across every tick of this loop's lifetime — it must persist for the life of the
+// process, since it holds the "last seen bytes" baseline each subsequent sample diffs against
+// (see deltatrack's package doc for why this is required at all: conntrack's byte counters are
+// cumulative-per-connection, not per-sample, and directly Add()-ing them double/triple/N-counts
+// any connection that outlives one sample interval).
 func runSampleLoop(ctx context.Context, store *podindex.Store, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
+	tracker := deltatrack.New()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := sampleOnce(store); err != nil {
+			if err := sampleOnce(store, tracker); err != nil {
 				log.Printf("sample error: %v", err)
 			}
 		}
 	}
 }
 
-func sampleOnce(store *podindex.Store) error {
+func sampleOnce(store *podindex.Store, tracker *deltatrack.Tracker) error {
 	timer := prometheus.NewTimer(metrics.SampleDurationSeconds)
 	defer timer.ObserveDuration()
 
@@ -135,6 +142,10 @@ func sampleOnce(store *podindex.Store) error {
 	if err != nil {
 		return err
 	}
+	// Rewrite each flow's OrigBytes from "cumulative since connection open" to "bytes since
+	// last sample" BEFORE aggregation — the aggregator/metrics layers have no concept of
+	// sampling history and must receive true per-interval deltas to report accurate cost.
+	flows = tracker.ApplyFlowDeltas(flows)
 
 	out := aggregator.Aggregate(flows, store.Lookup)
 	if out.Unresolved > 0 {
