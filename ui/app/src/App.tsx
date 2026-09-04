@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ReactFlow,
+  ReactFlowProvider,
   Background,
   Controls,
   applyNodeChanges,
+  useReactFlow,
   type Node,
   type NodeChange,
   type EdgeMarker,
@@ -24,6 +26,25 @@ const nodeTypes = { flowBox: FlowBoxNode }
 const edgeTypes = { flowGraph: FlowGraphEdge }
 
 type ViewMode = 'zone' | 'workload'
+
+/** ReactFlow's `fitView` prop only runs once, on the component's initial mount — switching
+ * viewMode later re-renders with all-new nodes/edges but does NOT re-run fitView, so the
+ * viewport stays framed for whichever view was active first. Caught this via a real headless
+ * browser screenshot against live 15-workload data: switching to the workload view left most
+ * boxes rendered off-canvas, framed for the much smaller zone view instead. Fixed by calling
+ * fitView() imperatively (via useReactFlow, which requires living inside a ReactFlowProvider)
+ * whenever viewMode or the node count changes. */
+function RefitOnViewChange({ viewMode, nodeCount }: { viewMode: ViewMode; nodeCount: number }) {
+  const { fitView } = useReactFlow()
+  useEffect(() => {
+    // Deferred one tick so this runs after ReactFlow has measured the newly-swapped node set —
+    // calling fitView() in the same tick as the nodes prop changing can compute bounds from the
+    // previous (stale) node positions.
+    const id = requestAnimationFrame(() => fitView({ padding: 0.15, duration: 200 }))
+    return () => cancelAnimationFrame(id)
+  }, [viewMode, nodeCount, fitView])
+  return null
+}
 
 /** Nodes are laid out on a static, deterministic circle (or side-by-side row for <=2 nodes) —
  * no force simulation. This is a closed-form function of (index, count), so it can never
@@ -292,23 +313,26 @@ export default function App() {
                   : 'No cross-AZ traffic observed yet.'}
               </div>
             ) : (
-              <ReactFlow
-                nodes={nodes}
-                edges={edges}
-                nodeTypes={nodeTypes}
-                edgeTypes={edgeTypes}
-                onNodesChange={onNodesChange}
-                onNodeDragStop={(_, node) => {
-                  nodePositionsRef.current.set(viewMode + ':' + node.id, node.position)
-                }}
-                fitView
-                minZoom={0.2}
-                maxZoom={3}
-                proOptions={{ hideAttribution: true }}
-              >
-                <Background gap={24} color="rgba(255,255,255,0.04)" />
-                <Controls showInteractive={false} />
-              </ReactFlow>
+              <ReactFlowProvider>
+                <ReactFlow
+                  nodes={nodes}
+                  edges={edges}
+                  nodeTypes={nodeTypes}
+                  edgeTypes={edgeTypes}
+                  onNodesChange={onNodesChange}
+                  onNodeDragStop={(_, node) => {
+                    nodePositionsRef.current.set(viewMode + ':' + node.id, node.position)
+                  }}
+                  fitView
+                  minZoom={0.2}
+                  maxZoom={3}
+                  proOptions={{ hideAttribution: true }}
+                >
+                  <Background gap={24} color="rgba(255,255,255,0.04)" />
+                  <Controls showInteractive={false} />
+                  <RefitOnViewChange viewMode={viewMode} nodeCount={nodes.length} />
+                </ReactFlow>
+              </ReactFlowProvider>
             )}
           </div>
         </div>
