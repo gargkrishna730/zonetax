@@ -53,6 +53,61 @@ Scope: AWS/EKS first. Conntrack-based sampling for MVP (eBPF is a possible v2).
          confirmed scroll-to-zoom changes the viewport transform, confirmed the workload filter
          correctly recomputes to just that workload's real routes, and confirmed the edge hover
          tooltip renders the correct per-workload cost breakdown.
+      6. Added a persistent click-to-drill-down panel on zone-to-zone edges (not just a hover
+         tooltip, which caps at "top 5" and can't be clicked into): shows the complete,
+         sortable list of real workload pairs behind a route, each row pivoting into the
+         Workload↔Workload view scoped to exactly that pair via an exact-pair filter (not the
+         coarser single-workload dropdown filter).
+      7. **Observability redesign** (SRE + design pass on ambiguous time semantics, no
+         daily/date filtering, cramped map, unlabeled "All workloads"): see the "Time-series &
+         observability redesign" entry below for the full breakdown — new backend history API,
+         redesigned KPI/session panel, daily/hourly cost chart, fullscreen map with search and
+         node-focus, and a real legend.
+- [x] **Cross-AZ cost accuracy fix (~80x overcount).** User asked to compare ZoneTax's tracked
+      cost against real AWS Cost Explorer billing (`DataTransfer-Regional-Bytes`, ~$2.13/day
+      account-wide) — ZoneTax was reporting an extrapolated ~$173/day, an ~80x overcount. Root
+      cause: `/proc/net/nf_conntrack`'s `bytes=` field is cumulative for a connection's entire
+      lifetime, not delta-since-last-sample; the agent was calling `counter.Add(cumulativeBytes)`
+      every 15s tick, so any long-lived connection (e.g. a persistent OTel gRPC stream) had its
+      full lifetime byte count re-added on every tick, compounding into massive overcounting —
+      this also explains why that workload topped the offenders list (an artifact, not real
+      cost). Fixed with a new `internal/deltatrack` package (6 unit tests) that tracks
+      last-seen-cumulative-bytes per connection and emits true per-sample deltas, handling
+      counter resets (connection restarts) by treating the post-reset value as a fresh delta
+      rather than a negative number. Deployed and re-verified against live `solrn-dev` data:
+      post-fix extrapolated rate came down to ~$8.35/day over a real 10-minute sample — still not
+      an exact match to the ~$2.13/day AWS figure (that comparison itself has real noise: AWS's
+      number is account-wide across all resources, not just this EKS cluster, and a 10-minute
+      sample extrapolated to a day vs. a 7-day steady average isn't apples-to-apples), but the
+      order-of-magnitude bug is confirmed fixed (~80x → ~4x, and the residual gap has a
+      plausible, non-buggy explanation rather than being unexplained).
+- [x] **Time-series & observability redesign.** User feedback: KPI values didn't state their
+      measurement period, "since agents last restarted" was ambiguous and gave no daily
+         breakdown, exact collection time/timezone/freshness weren't visible, there was no
+         daily/hourly cost view, the map was too small to inspect and had no fullscreen mode,
+         "All workloads" was hard to read, and there was no legend or node-search/focus. Backend:
+         added `internal/collector/history.go` (in-memory hourly-bucketed history built by
+         snapshotting the collector's cumulative cost/traffic totals every cycle and diffing
+         consecutive snapshots — since Summary's totals are cumulative Prometheus-counter values,
+         not per-cycle deltas, matching the same class of problem the deltatrack fix solved at the
+         byte-counting layer; counter resets are handled the same way). Every bucket honestly
+         reports `complete`/`has_data` so a partial/in-progress or before-history-began bucket is
+         never presented as equivalent to a fully observed one. New `GET /api/v1/history?range=
+         1h|6h|24h|7d` endpoint (8 collector-level + 5 API-level tests). `/api/v1/costs` and
+         `/api/v1/top` now also return `server_time_utc`, `collector_started_at_utc`, and
+         `scrape_interval_seconds` so the UI never has to guess or invent a timestamp. Frontend
+         (Vitest + Testing Library added as the project's first frontend test framework, 39 tests):
+         redesigned `KpiPanel` labels every KPI as an explicit "this session" metric (not a
+         calendar day) with a session panel showing exact last-collected/server-time/session-start
+         timestamps + timezone and collection interval; new `CostHistoryChart` (daily bars for the
+         7d range, hourly for shorter ranges, real loading/error/empty states, hover tooltip with
+         exact window + completeness); map got a search box (workload/namespace/zone substring
+         match, dims non-matching nodes/edges rather than removing them), click-to-focus on any
+         node (highlights just its inbound/outbound routes, generalizing the "click zone A→B, see
+         workload breakdown" request to any node in either view), a real `MapLegend` (arrow
+         direction, color scale, line-thickness meaning), and a fullscreen mode (Escape key +
+         close button, backdrop, filters/search/focus/positions all carry over since it's the same
+         ReactFlow instance reparented, not a second diagram).
 - [ ] **M4** — Alerting: Slack webhook on $/hour threshold breach.
 - [ ] **M5** — CLI (`zonetax top`, `zonetax report --since 1h`) hitting the collector API.
 - [ ] **M6** — Polish: multi-arch CI images, demo GIF against a real multi-AZ EKS cluster,

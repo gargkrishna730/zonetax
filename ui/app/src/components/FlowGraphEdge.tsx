@@ -25,6 +25,9 @@ export type FlowGraphEdgeData = {
    * investigation. Undefined when there's nothing further to drill into (e.g. already at the
    * most granular workload-to-workload view). */
   onSelect?: () => void
+  /** True when a node-focus filter is active and this edge does NOT touch the focused node —
+   * rendered faded so the focused node's actual inbound/outbound routes stand out clearly. */
+  dimmed?: boolean
 }
 
 export type FlowGraphEdge = Edge<FlowGraphEdgeData, 'flowGraph'>
@@ -55,7 +58,7 @@ export function FlowGraphEdge({ id, source, target, data, markerEnd }: EdgeProps
     curvature: 0.35,
   })
 
-  const { pair, color, widthPx, breakdownHeading, onSelect } = data
+  const { pair, color, widthPx, breakdownHeading, onSelect, dimmed } = data
   const topBreakdown = Array.from(pair.breakdown.values())
     .sort((a, b) => b.cost - a.cost)
     .slice(0, 5)
@@ -67,7 +70,13 @@ export function FlowGraphEdge({ id, source, target, data, markerEnd }: EdgeProps
         id={id}
         path={edgePath}
         markerEnd={markerEnd}
-        style={{ stroke: color, strokeWidth: widthPx, cursor: onSelect ? 'pointer' : 'default' }}
+        style={{
+          stroke: color,
+          strokeWidth: widthPx,
+          cursor: onSelect ? 'pointer' : 'default',
+          opacity: dimmed ? 0.12 : 1,
+          transition: 'opacity 150ms',
+        }}
       />
       {/* Wide invisible hit-path so thin, low-cost edges are still easy to hover/click — a thin
           visible stroke is bad UX to target precisely, especially once zoomed out. */}
@@ -88,6 +97,7 @@ export function FlowGraphEdge({ id, source, target, data, markerEnd }: EdgeProps
             transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
             background: color,
             cursor: onSelect ? 'pointer' : 'default',
+            opacity: dimmed ? 0.12 : 1,
           }}
           onMouseEnter={showTooltip}
           onMouseLeave={hideTooltip}

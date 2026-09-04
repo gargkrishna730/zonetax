@@ -29,6 +29,19 @@ type costsResponse struct {
 	Region    string  `json:"region"`
 	Entries   []entry `json:"entries"`
 	Totals    totals  `json:"totals"`
+	// ServerTimeUTC is this response's own generation time, in RFC3339 UTC — lets the UI show
+	// an exact, unambiguous "as of" timestamp (and detect client/server clock skew) rather than
+	// only a vague client-side "updated Ns ago" derived from UpdatedAt.
+	ServerTimeUTC string `json:"server_time_utc"`
+	// CollectorStartedAtUTC is when this collector process completed its first successful
+	// collection cycle (RFC3339 UTC), empty if none has completed yet. This is what "tracked"
+	// totals and Cross-AZ spend are measured SINCE — a session/process metric, explicitly not a
+	// calendar day, and distinct from the deeper HistoryStartUTC below.
+	CollectorStartedAtUTC string `json:"collector_started_at_utc,omitempty"`
+	// ScrapeIntervalSeconds is the collector's configured collection cadence — how often
+	// Totals/Entries can change, i.e. the real "data freshness" bound (not the UI's own poll
+	// interval, which is a separate, unrelated number).
+	ScrapeIntervalSeconds int `json:"scrape_interval_seconds"`
 }
 
 type entry struct {
@@ -57,11 +70,13 @@ type totals struct {
 // buildResponse converts a costengine.Summary (+ Store metadata) into the wire response shared
 // by Costs and Top, so the two handlers can't drift out of sync on which fields get populated —
 // exactly the kind of duplication that caused Top to previously ship without Totals set.
-func buildResponse(summary costengine.Summary, updatedAt time.Time, lastErr error, entries []entry) costsResponse {
+func buildResponse(summary costengine.Summary, updatedAt time.Time, lastErr error, entries []entry, startedAt time.Time, scrapeInterval time.Duration) costsResponse {
 	resp := costsResponse{
-		Cloud:   summary.Cloud,
-		Region:  summary.Region,
-		Entries: entries,
+		Cloud:                 summary.Cloud,
+		Region:                summary.Region,
+		Entries:               entries,
+		ServerTimeUTC:         time.Now().UTC().Format(time.RFC3339),
+		ScrapeIntervalSeconds: int(scrapeInterval.Seconds()),
 		Totals: totals{
 			CrossAZGB:              summary.TotalCrossAZGB,
 			CrossAZUSD:             summary.TotalCrossAZCost,
@@ -72,6 +87,9 @@ func buildResponse(summary costengine.Summary, updatedAt time.Time, lastErr erro
 	}
 	if !updatedAt.IsZero() {
 		resp.UpdatedAt = updatedAt.UTC().Format(time.RFC3339)
+	}
+	if !startedAt.IsZero() {
+		resp.CollectorStartedAtUTC = startedAt.UTC().Format(time.RFC3339)
 	}
 	if lastErr != nil {
 		resp.StaleErr = lastErr.Error()
@@ -98,7 +116,7 @@ func toEntries(src []costengine.Entry) []entry {
 // failure shouldn't make callers treat otherwise-valid recent data as unavailable.
 func (h *Handler) Costs(w http.ResponseWriter, r *http.Request) {
 	summary, updatedAt, lastErr := h.store.Latest()
-	resp := buildResponse(summary, updatedAt, lastErr, toEntries(summary.Entries))
+	resp := buildResponse(summary, updatedAt, lastErr, toEntries(summary.Entries), h.store.StartedAt(), h.store.ScrapeInterval())
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
@@ -124,7 +142,7 @@ func (h *Handler) Top(w http.ResponseWriter, r *http.Request) {
 		entries = entries[:n]
 	}
 
-	resp := buildResponse(summary, updatedAt, lastErr, entries)
+	resp := buildResponse(summary, updatedAt, lastErr, entries, h.store.StartedAt(), h.store.ScrapeInterval())
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
@@ -160,3 +178,94 @@ var errNotANumber = errInvalidInt("not a positive integer")
 type errInvalidInt string
 
 func (e errInvalidInt) Error() string { return string(e) }
+
+// historyResponse is the wire format for GET /api/v1/history.
+type historyResponse struct {
+	// RangeRequested/RangeStartUTC/RangeEndUTC describe the window the caller asked for
+	// (?range=1h|6h|24h|7d), in RFC3339 UTC — always present so the UI can label a chart's axis
+	// with real, non-invented timestamps rather than a vague "last N hours".
+	RangeRequested string `json:"range_requested"`
+	RangeStartUTC  string `json:"range_start_utc"`
+	RangeEndUTC    string `json:"range_end_utc"`
+	ServerTimeUTC  string `json:"server_time_utc"`
+	// HistoryStartUTC is when this collector's retained history actually begins — may be LATER
+	// than RangeStartUTC (e.g. a 7-day range requested from a collector that's only been up 2
+	// hours). The UI must use this, not silently assume the full requested range has data.
+	HistoryStartUTC       string          `json:"history_start_utc,omitempty"`
+	ScrapeIntervalSeconds int             `json:"scrape_interval_seconds"`
+	BucketSizeSeconds     int             `json:"bucket_size_seconds"`
+	Buckets               []historyBucket `json:"buckets"`
+}
+
+type historyBucket struct {
+	StartUTC       string  `json:"start_utc"`
+	EndUTC         string  `json:"end_utc"`
+	CrossAZCostUSD float64 `json:"cross_az_cost_usd"`
+	CrossAZGB      float64 `json:"cross_az_gb"`
+	SameAZGB       float64 `json:"same_az_gb"`
+	// Complete=false means this bucket's window is only partially covered by observed data
+	// (the current in-progress bucket, or one that started before the collector's history
+	// began) — the UI must visually distinguish this from a fully-observed bucket rather than
+	// presenting a partial number as if it were the whole period's total.
+	Complete bool `json:"complete"`
+	// HasData=false means there is no observed data at all for this bucket (entirely before
+	// the collector's history began) — distinct from Complete=false-with-partial-data.
+	HasData bool `json:"has_data"`
+}
+
+// supportedRanges maps the API's ?range= query values to their duration and the fixed hourly
+// bucket size used to build history.Buckets — day-level buckets are computed client-side over
+// bucket boundaries where relevant, rather than the collector maintaining two bucket
+// granularities, since the UI can trivially fold 24 hourly buckets into 1 daily one but not the
+// reverse.
+var supportedRanges = map[string]time.Duration{
+	"1h":  time.Hour,
+	"6h":  6 * time.Hour,
+	"24h": 24 * time.Hour,
+	"7d":  7 * 24 * time.Hour,
+}
+
+// History handles GET /api/v1/history?range=1h|6h|24h|7d (default 24h), returning hourly
+// cost/traffic delta buckets derived from collector.History's cumulative-total snapshots. This
+// is in-memory history bounded to how long THIS collector process has been running (see
+// collector.Store.StartedAt/History.EarliestSnapshot) — not a durable time-series database —
+// and every bucket honestly reports whether it reflects a complete period or partial/no data,
+// so the UI never presents an incomplete window as equivalent to a full one.
+func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
+	rangeParam := r.URL.Query().Get("range")
+	if rangeParam == "" {
+		rangeParam = "24h"
+	}
+	dur, ok := supportedRanges[rangeParam]
+	if !ok {
+		http.Error(w, `invalid "range" — supported values: 1h, 6h, 24h, 7d`, http.StatusBadRequest)
+		return
+	}
+
+	now := time.Now().UTC()
+	since := now.Add(-dur)
+	buckets := h.store.History().Buckets(since, now, time.Hour)
+
+	resp := historyResponse{
+		RangeRequested:        rangeParam,
+		RangeStartUTC:         since.Format(time.RFC3339),
+		RangeEndUTC:           now.Format(time.RFC3339),
+		ServerTimeUTC:         now.Format(time.RFC3339),
+		ScrapeIntervalSeconds: int(h.store.ScrapeInterval().Seconds()),
+		BucketSizeSeconds:     int(time.Hour.Seconds()),
+		Buckets:               make([]historyBucket, 0, len(buckets)),
+	}
+	if earliest := h.store.History().EarliestSnapshot(); !earliest.IsZero() {
+		resp.HistoryStartUTC = earliest.UTC().Format(time.RFC3339)
+	}
+	for _, b := range buckets {
+		resp.Buckets = append(resp.Buckets, historyBucket{
+			StartUTC: b.Start.UTC().Format(time.RFC3339), EndUTC: b.End.UTC().Format(time.RFC3339),
+			CrossAZCostUSD: b.CrossAZCostUSD, CrossAZGB: b.CrossAZGB, SameAZGB: b.SameAZGB,
+			Complete: b.Complete, HasData: b.HasData,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}

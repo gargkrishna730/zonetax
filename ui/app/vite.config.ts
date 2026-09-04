@@ -1,5 +1,5 @@
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 
 // ZoneTax's Vite app is built and its output embedded directly into the Go collector binary
 // (see ui/ui.go's go:embed) so the whole dashboard ships as part of the single collector image
@@ -22,5 +22,14 @@ export default defineConfig({
     proxy: {
       '/api': 'http://localhost:18099',
     },
+  },
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    // Without this, Vitest can inherit a "production" NODE_ENV from the invoking shell/CI,
+    // which makes React resolve its production build (no react-dom/test-utils act()) and every
+    // component test fails with "React.act is not a function" — force "test" explicitly so
+    // React always loads its development build under Vitest regardless of the outer shell env.
+    env: { NODE_ENV: 'test' },
   },
 })

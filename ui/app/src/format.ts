@@ -53,5 +53,53 @@ export function fmtAgo(iso?: string): string {
   const secs = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000))
   if (secs < 5) return 'just now'
   if (secs < 60) return secs + 's ago'
-  return Math.round(secs / 60) + 'm ago'
+  if (secs < 3600) return Math.round(secs / 60) + 'm ago'
+  return Math.round(secs / 3600) + 'h ago'
+}
+
+/** Local IANA timezone abbreviation for this browser, e.g. "IST", "PDT" — used so every exact
+ * timestamp shown in the UI states unambiguously which zone it's in rather than leaving the
+ * viewer to guess whether a time is local or UTC. */
+export function localTzAbbrev(): string {
+  try {
+    const parts = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(new Date())
+    return parts.find((p) => p.type === 'timeZoneName')?.value ?? 'local'
+  } catch {
+    return 'local'
+  }
+}
+
+/** Exact local timestamp, e.g. "Sep 5, 5:45:12 PM IST" — the "exact collection time" the
+ * dashboard now shows alongside every relative "Ns ago" freshness label. Returns null for a
+ * missing/invalid ISO string so callers can render an explicit empty state instead of "Invalid
+ * Date". */
+export function fmtExact(iso?: string): string | null {
+  if (!iso) return null
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return null
+  const datePart = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  const timePart = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' })
+  return `${datePart}, ${timePart} ${localTzAbbrev()}`
+}
+
+/** Formats a duration in seconds as a short human string, e.g. "45s", "3m", "2h 15m" — used for
+ * "scrape every Ns" and "since agent started Nh Nm" style session/collector metrics, distinct
+ * from calendar-day framing. */
+export function fmtDuration(seconds: number): string {
+  if (seconds < 60) return Math.round(seconds) + 's'
+  const mins = Math.floor(seconds / 60)
+  if (mins < 60) return mins + 'm'
+  const hrs = Math.floor(mins / 60)
+  const remMins = mins % 60
+  if (hrs < 24) return remMins > 0 ? `${hrs}h ${remMins}m` : `${hrs}h`
+  const days = Math.floor(hrs / 24)
+  const remHrs = hrs % 24
+  return remHrs > 0 ? `${days}d ${remHrs}h` : `${days}d`
+}
+
+/** Compact date label for a chart axis / bucket, e.g. "Sep 5" or "5 PM" depending on span. */
+export function fmtBucketLabel(iso: string, granularity: 'hour' | 'day'): string {
+  const d = new Date(iso)
+  if (granularity === 'day') return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  return d.toLocaleTimeString(undefined, { hour: 'numeric' })
 }

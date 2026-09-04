@@ -14,7 +14,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import './dashboard.css'
 
-import type { CostsResponse, CostEntry } from './types'
+import type { CostsResponse, CostEntry, HistoryRange } from './types'
 import {
   buildZoneFlow,
   buildWorkloadFlow,
@@ -25,9 +25,14 @@ import {
   type WorkloadPairBreakdown,
 } from './flowGraph'
 import { costColor, fmtAgo, fmtGB, fmtUSD } from './format'
+import { nodeMatchesQuery, neighborhoodOf } from './mapSearch'
+import { useHistory } from './useHistory'
 import { FlowBoxNode, type FlowBoxNodeData } from './components/FlowBoxNode'
 import { FlowGraphEdge, type FlowGraphEdgeData } from './components/FlowGraphEdge'
 import { EdgeDrillDownPanel, type DrillDownSelection } from './components/EdgeDrillDownPanel'
+import { MapLegend } from './components/MapLegend'
+import { KpiPanel } from './components/KpiPanel'
+import { CostHistoryChart } from './components/CostHistoryChart'
 
 const POLL_MS = 10_000
 
@@ -107,6 +112,20 @@ export default function App() {
   // view populates this with every real workload pair behind that route (see
   // buildWorkloadPairBreakdown) rather than the hover tooltip's capped top-5.
   const [drillDown, setDrillDown] = useState<DrillDownSelection | null>(null)
+  // Fullscreen map mode: a substantially larger canvas is the #1 fix for "the map is too small
+  // to inspect" — rather than inventing a second diagram, the SAME ReactFlow instance is
+  // reparented into an overlay so filters/selection/positions all carry over untouched.
+  const [mapFullscreen, setMapFullscreen] = useState(false)
+  // Free-text search across node id/label/sublabel (workload, namespace, or zone name) — matched
+  // nodes/edges stay full-opacity, everything else dims, rather than actually removing nodes
+  // from the graph (removing them would also silently hide their un-searched-for edges/context).
+  const [mapSearch, setMapSearch] = useState('')
+  // Clicking a node "focuses" it: only that node's own inbound/outbound routes stay bright,
+  // everything else dims — the requested "click a workload, see its zone A/B breakdown"
+  // interaction, generalized to any node in either view. Click the same node again to unfocus.
+  const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null)
+  const [historyRange, setHistoryRange] = useState<HistoryRange>('24h')
+  const history = useHistory(historyRange)
   // Node positions persist across data refreshes AND across switching view mode back and forth
   // (keyed by "viewMode:nodeId" so a zone id and a workload id can never collide) so a user's
   // drag isn't undone by the next 10s poll or by toggling views.
@@ -132,6 +151,17 @@ export default function App() {
       clearInterval(id)
     }
   }, [])
+
+  // Escape key exits fullscreen map mode — a required control per the fullscreen spec, not
+  // just the visible close button, since a keyboard-first / power user expects it to just work.
+  useEffect(() => {
+    if (!mapFullscreen) return
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setMapFullscreen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [mapFullscreen])
 
   const entries: CostEntry[] = costs?.entries ?? []
   const positiveEntries = useMemo(() => entries.filter((e) => e.cost_usd > 0), [entries])
@@ -190,6 +220,35 @@ export default function App() {
     setNodes((nds) => applyNodeChanges(changes, nds))
   }, [])
 
+  // Reset search/focus when the underlying entity set changes shape (view mode or workload
+  // filter) so a stale focused-node-id from the zone view doesn't silently persist (and match
+  // nothing) after switching to the workload view.
+  useEffect(() => {
+    setFocusedNodeId(null)
+  }, [viewMode, filterKey, pairFilter])
+
+  const nodesById = useMemo(() => new Map(flowGraph.nodes.map((n) => [n.id, n])), [flowGraph.nodes])
+
+  // The neighborhood (self + directly connected nodes) of the focused node, or null when no
+  // node is focused — null is treated as "everything is in scope" everywhere this is used.
+  const focusedNeighborhood = useMemo(
+    () => (focusedNodeId ? neighborhoodOf(focusedNodeId, flowGraph.pairs) : null),
+    [focusedNodeId, flowGraph.pairs],
+  )
+
+  // A node/edge is dimmed if a search query is active and it doesn't match, OR a node is
+  // focused and this node/edge isn't in its neighborhood. Both conditions can combine (e.g.
+  // search AND focus active at once) — dim if EITHER excludes it.
+  const isNodeDimmed = useCallback(
+    (id: string) => {
+      const node = nodesById.get(id)
+      if (mapSearch.trim() && (!node || !nodeMatchesQuery(node, mapSearch))) return true
+      if (focusedNeighborhood && !focusedNeighborhood.has(id)) return true
+      return false
+    },
+    [nodesById, mapSearch, focusedNeighborhood],
+  )
+
   const edges = useMemo(() => {
     const breakdownHeading = viewMode === 'zone' ? 'Top workloads' : 'Top zone routes'
     return flowGraph.pairs.map((pair) => {
@@ -212,16 +271,33 @@ export default function App() {
                 pairs: buildWorkloadPairBreakdown(pair.entries),
               })
           : undefined
+      const dimmed = isNodeDimmed(pair.srcId) || isNodeDimmed(pair.dstId)
       return {
         id: `${pair.srcId}>${pair.dstId}`,
         source: pair.srcId,
         target: pair.dstId,
         type: 'flowGraph' as const,
         markerEnd: marker,
-        data: { pair, color, widthPx, breakdownHeading, onSelect } satisfies FlowGraphEdgeData,
+        data: { pair, color, widthPx, breakdownHeading, onSelect, dimmed } satisfies FlowGraphEdgeData,
       }
     })
-  }, [flowGraph, viewMode])
+  }, [flowGraph, viewMode, isNodeDimmed])
+
+  // Injects search/focus emphasis + click-to-focus into the positioned node state, without
+  // making emphasis part of that state itself — so a search keystroke doesn't reset drag
+  // positions (setNodes above intentionally excludes mapSearch/focusedNodeId from its deps).
+  const displayNodes = useMemo(
+    () =>
+      nodes.map((n) => ({
+        ...n,
+        data: {
+          ...n.data,
+          emphasis: focusedNodeId === n.id ? ('focused' as const) : isNodeDimmed(n.id) ? ('dimmed' as const) : undefined,
+          onClick: () => setFocusedNodeId((cur) => (cur === n.id ? null : n.id)),
+        },
+      })),
+    [nodes, focusedNodeId, isNodeDimmed],
+  )
 
   const totalCost = flowGraph.pairs.reduce((s, p) => s + p.cost, 0)
   const totalGB = flowGraph.pairs.reduce((s, p) => s + p.gb, 0)
@@ -262,42 +338,18 @@ export default function App() {
       </header>
 
       <main className={offendersCollapsed ? 'offenders-collapsed' : ''}>
-        <div className="card kpis">
-          <div className="kpi">
-            <div className="label">Cross-AZ spend (tracked)</div>
-            <div className="value cost">{fmtUSD(costs?.totals.cross_az_cost_usd ?? 0)}</div>
-            <div className="sub">since agents last restarted</div>
-          </div>
-          <div className="kpi">
-            <div className="label">Cross-AZ traffic</div>
-            <div className="value">{fmtGB(costs?.totals.cross_az_gb ?? 0)}</div>
-            <div className="sub">
-              {costs
-                ? (
-                    (100 * costs.totals.cross_az_gb) /
-                    Math.max(1e-9, costs.totals.cross_az_gb + costs.totals.same_az_gb)
-                  ).toFixed(1)
-                : '0'}
-              % of all traffic is cross-AZ
-            </div>
-          </div>
-          <div className="kpi">
-            <div className="label">Same-AZ traffic</div>
-            <div className="value">{fmtGB(costs?.totals.same_az_gb ?? 0)}</div>
-            <div className="sub">free, for comparison</div>
-          </div>
-          <div className="kpi">
-            <div className="label">Price / GB</div>
-            <div className="value">{fmtUSD(costs?.totals.price_per_gb_usd ?? 0)}/GB</div>
-            <div className="sub">
-              {costs?.totals.price_per_gb_direction_usd
-                ? `$${costs.totals.price_per_gb_direction_usd.toFixed(3)}/GB each direction, billed twice`
-                : '—'}
-            </div>
-          </div>
-        </div>
+        <KpiPanel costs={costs} fetchError={fetchError} />
 
-        <div className="card flow-card">
+        <CostHistoryChart
+          range={historyRange}
+          onRangeChange={setHistoryRange}
+          history={history.data}
+          loading={history.loading}
+          error={history.error}
+        />
+
+
+        <div className={`card flow-card${mapFullscreen ? ' flow-fullscreen-anchor' : ''}`}>
           <div className="card-head">
             <h2>Traffic map</h2>
             <div className="head-controls">
@@ -327,6 +379,14 @@ export default function App() {
                   Workload → Workload
                 </button>
               </div>
+              <input
+                type="text"
+                className="map-search"
+                placeholder="Search workload, namespace, or zone…"
+                value={mapSearch}
+                onChange={(e) => setMapSearch(e.target.value)}
+                aria-label="Search the traffic map"
+              />
               {pairFilter ? (
                 <div className="pair-filter-chip">
                   <span>
@@ -338,13 +398,15 @@ export default function App() {
                 </div>
               ) : (
                 <select
+                  className="workload-select"
                   value={filterKey}
                   onChange={(e) => {
                     setFilterKey(e.target.value)
                     setPairFilter(null)
                   }}
+                  title={filterKey ? workloadOptions.find(([k]) => k === filterKey)?.[1].label : 'All workloads'}
                 >
-                  <option value="">All workloads</option>
+                  <option value="">All workloads ({workloadOptions.length})</option>
                   {workloadOptions.map(([key, v]) => (
                     <option key={key} value={key}>
                       {v.label} — {fmtUSD(v.cost)}
@@ -352,22 +414,34 @@ export default function App() {
                   ))}
                 </select>
               )}
+              <button
+                type="button"
+                className="fullscreen-btn"
+                onClick={() => setMapFullscreen((v) => !v)}
+                title={mapFullscreen ? 'Exit fullscreen (Esc)' : 'Expand to fullscreen'}
+                aria-pressed={mapFullscreen}
+              >
+                {mapFullscreen ? '⤡ Exit fullscreen' : '⤢ Fullscreen'}
+              </button>
             </div>
           </div>
           <div className="flow-summary">
             {flowGraph.nodes.length} {viewMode === 'zone' ? 'zone' : 'workload'}
             {flowGraph.nodes.length === 1 ? '' : 's'} · {flowGraph.pairs.length} route
             {flowGraph.pairs.length === 1 ? '' : 's'} · {fmtUSD(totalCost)} · {fmtGB(totalGB)}
+            {' · '}every route with any tracked cost is shown, none are hidden below a threshold
           </div>
-          <div className="legend">
-            <span>
-              {viewMode === 'zone'
-                ? 'Arrow = source zone → destination zone'
-                : 'Arrow = source workload → destination workload'}
-            </span>
-            <span>Drag boxes · scroll or pinch to zoom</span>
-          </div>
-          <div className="flow-canvas">
+          <MapLegend viewMode={viewMode} />
+          {mapFullscreen && <div className="fullscreen-backdrop" onClick={() => setMapFullscreen(false)} />}
+          <div className={`flow-canvas${mapFullscreen ? ' flow-canvas-fullscreen' : ''}`}>
+            {focusedNodeId && (
+              <div className="focus-chip">
+                <span>Focused: {nodesById.get(focusedNodeId)?.label ?? focusedNodeId}</span>
+                <button type="button" onClick={() => setFocusedNodeId(null)} aria-label="Clear focus">
+                  ×
+                </button>
+              </div>
+            )}
             {flowGraph.pairs.length === 0 ? (
               <div className="empty">
                 {filterKey
@@ -377,7 +451,7 @@ export default function App() {
             ) : (
               <ReactFlowProvider>
                 <ReactFlow
-                  nodes={nodes}
+                  nodes={displayNodes}
                   edges={edges}
                   nodeTypes={nodeTypes}
                   edgeTypes={edgeTypes}
@@ -385,8 +459,9 @@ export default function App() {
                   onNodeDragStop={(_, node) => {
                     nodePositionsRef.current.set(viewMode + ':' + node.id, node.position)
                   }}
+                  onPaneClick={() => setFocusedNodeId(null)}
                   fitView
-                  minZoom={0.2}
+                  minZoom={0.15}
                   maxZoom={3}
                   proOptions={{ hideAttribution: true }}
                 >

@@ -20,6 +20,8 @@ jobs:
         working-directory: ui/app
         run: |
           npm ci
+          npm run lint
+          npm test
           npm run build
       - uses: actions/setup-go@v5
         with:

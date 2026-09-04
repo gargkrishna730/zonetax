@@ -61,6 +61,7 @@ func main() {
 	})
 	mux.HandleFunc("/api/v1/costs", handler.Costs)
 	mux.HandleFunc("/api/v1/top", handler.Top)
+	mux.HandleFunc("/api/v1/history", handler.History)
 	mux.Handle("/", http.FileServer(http.FS(ui.FS())))
 
 	addr := ":8080"
