@@ -169,8 +169,14 @@ select {
 }
 .fullscreen-btn:hover { color: var(--text); border-color: #3a4256; }
 .flow-fullscreen-anchor { position: relative; }
-.flow-canvas-fullscreen {
-  position: fixed; inset: 16px; z-index: 100; height: auto !important;
+/* Raised specificity (.flow-canvas.flow-canvas-fullscreen, not just .flow-canvas-fullscreen)
+   so this always wins over the later, single-class .flow-canvas rule regardless of source
+   order in the stylesheet — a same-specificity clash here previously let .flow-canvas's
+   `position: relative` and fixed `height: 520px` silently override the fullscreen positioning,
+   collapsing the expanded map to a 2px-tall sliver (caught via a real headless-browser
+   screenshot showing an empty fullscreen overlay, not just a visual read of the CSS). */
+.flow-canvas.flow-canvas-fullscreen {
+  position: fixed !important; inset: 16px; z-index: 100; height: auto !important; width: auto !important;
   box-shadow: 0 24px 64px rgba(0,0,0,0.7);
 }
 .fullscreen-backdrop {
