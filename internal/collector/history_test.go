@@ -94,20 +94,56 @@ func TestHistory_BucketBeforeAnySnapshotHasNoData(t *testing.T) {
 	}
 }
 
-func TestHistory_PartialBucketStraddlingFirstSnapshotHasNoData(t *testing.T) {
-	// A bucket that STARTS before the first snapshot but ENDS after it: we only know the
-	// cumulative value at the snapshot, not what it was at the bucket's true start, so the
-	// in-bucket delta is unknowable and must be reported as no-data rather than guessed.
+func TestHistory_PartialBucketStraddlingFirstSnapshotUsesEarliestAsFallbackBaseline(t *testing.T) {
+	// A bucket that STARTS before the first snapshot but ENDS after it: we don't know the true
+	// cumulative value at the bucket's real start, so we fall back to the earliest available
+	// snapshot as an approximate baseline — this under-counts the unobservable portion before
+	// history began, but correctly surfaces the real, observed delta instead of permanently
+	// showing "no data" for a period that plainly has data (the bug this regresses against: the
+	// very first bucket after every collector restart stayed "no data" forever, even minutes
+	// later once real numbers existed within it — caught via a user screen recording).
 	h := NewHistory(24)
 	firstSnap := mustParse(t, "2026-09-05T10:30:00Z")
 	h.Record(firstSnap, 1.00, 50, 5)
+	h.Record(mustParse(t, "2026-09-05T10:45:00Z"), 1.60, 80, 8)
 
 	buckets := h.Buckets(mustParse(t, "2026-09-05T10:00:00Z"), mustParse(t, "2026-09-05T11:00:00Z"), time.Hour)
 	if len(buckets) != 1 {
 		t.Fatalf("Buckets() returned %d, want 1", len(buckets))
 	}
-	if buckets[0].HasData {
-		t.Error("bucket straddling the first-ever snapshot should have HasData = false (baseline unknowable)")
+	b := buckets[0]
+	if !b.HasData {
+		t.Error("bucket straddling the first-ever snapshot should have HasData = true (real data exists from 10:30 onward)")
+	}
+	if got, want := b.CrossAZCostUSD, 0.60; !almostEqualHistory(got, want) {
+		t.Errorf("CrossAZCostUSD = %v, want %v (1.60 - 1.00, using the earliest snapshot as baseline)", got, want)
+	}
+	// This bucket is missing the 10:00-10:30 portion (before history began) — it must never be
+	// reported as Complete even though a later snapshot exists past its end.
+	if b.Complete {
+		t.Error("bucket using a fallback (approximate) baseline must not be marked Complete")
+	}
+}
+
+// TestHistory_BucketEntirelyAfterFirstSnapshotIsUnaffectedByFallback is a regression guard: the
+// fallback-baseline logic must only kick in for the specific bucket that straddles history's
+// start, not for later buckets that already have a proper at-or-before-start snapshot.
+func TestHistory_BucketEntirelyAfterFirstSnapshotIsUnaffectedByFallback(t *testing.T) {
+	h := NewHistory(24)
+	base := mustParse(t, "2026-09-05T10:00:00Z")
+	h.Record(base, 1.00, 50, 5)
+	h.Record(base.Add(65*time.Minute), 2.00, 100, 10)
+	h.Record(base.Add(125*time.Minute), 3.50, 175, 17)
+
+	buckets := h.Buckets(base, base.Add(130*time.Minute), time.Hour)
+	if len(buckets) != 3 {
+		t.Fatalf("Buckets() returned %d, want 3", len(buckets))
+	}
+	// The second bucket [11:00,12:00) has a proper baseline (the 11:05 snapshot's predecessor,
+	// the 10:00 one is before 11:00 — actually the last snapshot at-or-before 11:00 is still the
+	// 10:00 one) and a proper latest (11:05) — it's fully observed and should be Complete.
+	if !buckets[1].Complete {
+		t.Error("a normally-baselined, fully-observed bucket should still be marked Complete")
 	}
 }
 

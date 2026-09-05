@@ -36,3 +36,4 @@ go.work.sum
 # the embedded UI can't silently drift from ui/app/src.
 /ui/app/node_modules/
 /ui/dist/
+debug-recordings/

@@ -111,19 +111,38 @@ func (h *History) Buckets(since, now time.Time, bucketSize time.Duration) []Buck
 		}
 		var costDelta, gbDelta, sameDelta float64
 		hasData := true
+		// usedFallbackBaseline marks that we approximated using the earliest available
+		// snapshot instead of a true at-or-before-start snapshot — this bucket is missing the
+		// portion of its window before history began, so it must never be reported as
+		// Complete even once a snapshot exists at/after its end.
+		usedFallbackBaseline := false
 		if !baselineOK {
-			// The bucket started before any snapshot existed — we only know the cumulative
-			// value AT its end, not what it was at its start, so the true in-bucket delta is
-			// unknowable. Reporting latest's absolute value would overstate this bucket
-			// (it would include everything since the counter's true start, not just this
-			// bucket), so it's correctly reported as no-data rather than a misleading number.
-			hasData = false
-		} else {
+			// The bucket started before any snapshot existed (guaranteed here, since baselineOK
+			// is false — i.e. no snapshot has at<=start, so snaps[0].at, the earliest ever
+			// snapshot, is > start). If that earliest snapshot still falls before this bucket's
+			// END, we have real, usable data from that point onward — using it as the baseline
+			// correctly computes "how much accumulated since we started observing," at the cost
+			// of under-counting the (unobservable) portion before history began. This was a
+			// real bug: without this fallback, the very first bucket after every collector
+			// restart stayed permanently "no data" even minutes later once plenty of real delta
+			// data existed within it — caught by a user screen recording showing the chart
+			// rendering completely empty shortly after a redeploy. If the earliest snapshot is
+			// at/after this bucket's end, there's truly no overlapping data and hasData stays
+			// false.
+			if snaps[0].at.Before(end) {
+				baseline = snaps[0]
+				baselineOK = true
+				usedFallbackBaseline = true
+			} else {
+				hasData = false
+			}
+		}
+		if baselineOK {
 			costDelta = resolveDelta(baseline.crossAZCost, latest.crossAZCost)
 			gbDelta = resolveDelta(baseline.crossAZGB, latest.crossAZGB)
 			sameDelta = resolveDelta(baseline.sameAZGB, latest.sameAZGB)
 		}
-		complete := hasData && !end.After(mostRecentSnapshotTime(snaps))
+		complete := hasData && !usedFallbackBaseline && !end.After(mostRecentSnapshotTime(snaps))
 		buckets = append(buckets, Bucket{
 			Start: start, End: end,
 			CrossAZCostUSD: costDelta, CrossAZGB: gbDelta, SameAZGB: sameDelta,
