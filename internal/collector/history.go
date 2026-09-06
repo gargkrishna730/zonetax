@@ -18,14 +18,35 @@ package collector
 
 import (
 	"time"
+
+	"github.com/gargkrishna730/zonetax/internal/costengine"
 )
 
-// snapshot is one recorded reading of the cumulative totals at a point in time.
+// entryKey identifies one route (src/dst zone + src/dst workload) for entry-level snapshotting —
+// mirrors costengine.Entry's identity fields, without Bytes/GB/CostUSD (those are the values
+// being snapshotted, not part of the key).
+type entryKey struct {
+	srcZone, dstZone          string
+	srcNamespace, srcWorkload string
+	dstNamespace, dstWorkload string
+}
+
+// entryVal is one route's CUMULATIVE gb/cost as of a snapshot (same cumulative-counter semantics
+// as the scalar totals below — see the package doc).
+type entryVal struct {
+	gb, costUSD float64
+}
+
+// snapshot is one recorded reading of the cumulative totals at a point in time, plus a per-route
+// breakdown at that same instant. The per-route map is what lets EntriesRange (below) answer
+// "which routes existed and how much did each cost in an arbitrary time window" — the scalar
+// fields alone can only answer that in aggregate, not broken down.
 type snapshot struct {
 	at          time.Time
 	crossAZCost float64
 	crossAZGB   float64
 	sameAZGB    float64
+	entries     map[entryKey]entryVal
 }
 
 // History accumulates cumulative-total snapshots and derives hourly cost/traffic deltas from
@@ -43,11 +64,20 @@ func NewHistory(maxHours int) *History {
 	return &History{maxHours: maxHours}
 }
 
-// Record appends a new cumulative-total snapshot and evicts anything older than maxHours. Not
-// safe to call concurrently with itself (Store serializes access via its own mutex — see
-// Store.set/Store.History, which is the only intended caller).
-func (h *History) Record(at time.Time, crossAZCost, crossAZGB, sameAZGB float64) {
-	h.snaps = append(h.snaps, snapshot{at: at, crossAZCost: crossAZCost, crossAZGB: crossAZGB, sameAZGB: sameAZGB})
+// Record appends a new cumulative-total snapshot (plus a per-route breakdown, keyed by
+// src/dst zone + src/dst workload) and evicts anything older than maxHours. Not safe to call
+// concurrently with itself (Store serializes access via its own mutex — see Store.set/
+// Store.History, which is the only intended caller).
+func (h *History) Record(at time.Time, crossAZCost, crossAZGB, sameAZGB float64, routeEntries []costengine.Entry) {
+	entries := make(map[entryKey]entryVal, len(routeEntries))
+	for _, e := range routeEntries {
+		entries[entryKey{
+			srcZone: e.SrcZone, dstZone: e.DstZone,
+			srcNamespace: e.SrcNamespace, srcWorkload: e.SrcWorkload,
+			dstNamespace: e.DstNamespace, dstWorkload: e.DstWorkload,
+		}] = entryVal{gb: e.GB, costUSD: e.CostUSD}
+	}
+	h.snaps = append(h.snaps, snapshot{at: at, crossAZCost: crossAZCost, crossAZGB: crossAZGB, sameAZGB: sameAZGB, entries: entries})
 	cutoff := at.Add(-time.Duration(h.maxHours) * time.Hour)
 	i := 0
 	for i < len(h.snaps) && h.snaps[i].at.Before(cutoff) {
@@ -59,6 +89,78 @@ func (h *History) Record(at time.Time, crossAZCost, crossAZGB, sameAZGB float64)
 	if i > 1 {
 		h.snaps = h.snaps[i-1:]
 	}
+}
+
+// RouteDelta is one route's real observed cost/traffic delta over a requested time window.
+type RouteDelta struct {
+	SrcZone, DstZone          string
+	SrcNamespace, SrcWorkload string
+	DstNamespace, DstWorkload string
+	GB, CostUSD               float64
+}
+
+// EntriesRange returns the real, per-route cost/traffic delta between the snapshot at-or-before
+// `since` and the snapshot at-or-before `now`, for an ARBITRARY window (not bucket-aligned) —
+// this is what lets the UI's time-range picker (15m/1h/6h/24h/7d/custom) rebuild the actual
+// map/routes/totals for the selected window, not just the scalar KPI numbers Buckets() already
+// covers. Returns (nil, false, false) if there's no snapshot at all at-or-before `now` (nothing
+// observed yet). The second bool (usedFallbackBaseline) mirrors Buckets' same reasoning: if no
+// snapshot exists at-or-before `since`, the earliest available snapshot is used instead,
+// under-counting the unobservable portion before history began rather than fabricating a zero
+// baseline — callers must treat that result as INCOMPLETE (partial), not a full window's total.
+func (h *History) EntriesRange(since, now time.Time) (deltas []RouteDelta, hasData bool, complete bool) {
+	if len(h.snaps) == 0 {
+		return nil, false, false
+	}
+	latest, latestOK := snapshotAtOrBefore(h.snaps, now)
+	if !latestOK {
+		return nil, false, false
+	}
+	baseline, baselineOK := snapshotAtOrBefore(h.snaps, since)
+	usedFallback := false
+	if !baselineOK {
+		if h.snaps[0].at.Before(now) {
+			baseline = h.snaps[0]
+			baselineOK = true
+			usedFallback = true
+		} else {
+			return nil, false, false
+		}
+	}
+	if baseline.at.Equal(latest.at) {
+		// Same snapshot on both ends (e.g. a 15m window shorter than the scrape interval) —
+		// there is technically no delta to report yet, distinct from "no data at all".
+		return nil, true, false
+	}
+
+	// Union of every route key seen in either snapshot — a route that existed at `since` but
+	// dropped to zero traffic by `now` (or vice versa: a brand-new route) must still be
+	// reported (as a real, zero-or-partial delta), not silently omitted.
+	keys := make(map[entryKey]struct{}, len(latest.entries))
+	for k := range baseline.entries {
+		keys[k] = struct{}{}
+	}
+	for k := range latest.entries {
+		keys[k] = struct{}{}
+	}
+	deltas = make([]RouteDelta, 0, len(keys))
+	for k := range keys {
+		b := baseline.entries[k] // zero value if absent — a genuinely new route since baseline
+		l := latest.entries[k]   // zero value if absent — a route that stopped between baseline and now
+		gbDelta := resolveDelta(b.gb, l.gb)
+		costDelta := resolveDelta(b.costUSD, l.costUSD)
+		if gbDelta <= 0 && costDelta <= 0 {
+			continue // no real traffic on this route within the window — omit, don't show a $0 row
+		}
+		deltas = append(deltas, RouteDelta{
+			SrcZone: k.srcZone, DstZone: k.dstZone,
+			SrcNamespace: k.srcNamespace, SrcWorkload: k.srcWorkload,
+			DstNamespace: k.dstNamespace, DstWorkload: k.dstWorkload,
+			GB: gbDelta, CostUSD: costDelta,
+		})
+	}
+	complete = !usedFallback && !now.After(mostRecentSnapshotTime(h.snaps))
+	return deltas, true, complete
 }
 
 // Bucket is one time-bucketed cost/traffic delta, plus whether the bucket is fully observed.

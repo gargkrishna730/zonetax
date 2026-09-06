@@ -3,6 +3,8 @@ package collector
 import (
 	"testing"
 	"time"
+
+	"github.com/gargkrishna730/zonetax/internal/costengine"
 )
 
 func mustParse(t *testing.T, s string) time.Time {
@@ -14,16 +16,118 @@ func mustParse(t *testing.T, s string) time.Time {
 	return tm
 }
 
+func fakeEntry(srcZone, dstZone, srcWorkload, dstWorkload string, gb, cost float64) costengine.Entry {
+	return costengine.Entry{
+		SrcZone: srcZone, DstZone: dstZone,
+		SrcNamespace: "ns", SrcWorkload: srcWorkload,
+		DstNamespace: "ns", DstWorkload: dstWorkload,
+		GB: gb, CostUSD: cost,
+	}
+}
+
+func TestHistory_EntriesRangeComputesPerRouteDelta(t *testing.T) {
+	h := NewHistory(24)
+	base := mustParse(t, "2026-09-05T10:00:00Z")
+
+	h.Record(base, 1.00, 50, 5, []costengine.Entry{
+		fakeEntry("us-east-1a", "us-east-1b", "web", "db", 40, 0.80),
+		fakeEntry("us-east-1a", "us-east-1c", "web", "cache", 10, 0.20),
+	})
+	h.Record(base.Add(30*time.Minute), 2.50, 100, 10, []costengine.Entry{
+		fakeEntry("us-east-1a", "us-east-1b", "web", "db", 90, 1.80),    // +50gb / +$1.00
+		fakeEntry("us-east-1a", "us-east-1c", "web", "cache", 20, 0.40), // +10gb / +$0.20
+	})
+
+	deltas, hasData, complete := h.EntriesRange(base, base.Add(30*time.Minute))
+	if !hasData || !complete {
+		t.Fatalf("EntriesRange: hasData=%v complete=%v, want true/true (window exactly spans two real snapshots)", hasData, complete)
+	}
+	if len(deltas) != 2 {
+		t.Fatalf("EntriesRange returned %d routes, want 2", len(deltas))
+	}
+	byRoute := map[string]RouteDelta{}
+	for _, d := range deltas {
+		byRoute[d.SrcZone+">"+d.DstZone] = d
+	}
+	if d := byRoute["us-east-1a>us-east-1b"]; !almostEqualHistory(d.GB, 50) || !almostEqualHistory(d.CostUSD, 1.00) {
+		t.Errorf("route a->b delta = gb=%v cost=%v, want gb=50 cost=1.00", d.GB, d.CostUSD)
+	}
+	if d := byRoute["us-east-1a>us-east-1c"]; !almostEqualHistory(d.GB, 10) || !almostEqualHistory(d.CostUSD, 0.20) {
+		t.Errorf("route a->c delta = gb=%v cost=%v, want gb=10 cost=0.20", d.GB, d.CostUSD)
+	}
+}
+
+func TestHistory_EntriesRangeNoSnapshotsYet(t *testing.T) {
+	h := NewHistory(24)
+	deltas, hasData, complete := h.EntriesRange(mustParse(t, "2026-09-05T10:00:00Z"), mustParse(t, "2026-09-05T11:00:00Z"))
+	if deltas != nil || hasData || complete {
+		t.Errorf("EntriesRange with no snapshots = (%v, %v, %v), want (nil, false, false)", deltas, hasData, complete)
+	}
+}
+
+func TestHistory_EntriesRangeWindowBeforeAnySnapshotHasNoData(t *testing.T) {
+	h := NewHistory(24)
+	base := mustParse(t, "2026-09-05T10:00:00Z")
+	h.Record(base, 1.00, 50, 5, []costengine.Entry{fakeEntry("a", "b", "web", "db", 50, 1.00)})
+
+	// Entire requested window is before the only snapshot exists.
+	deltas, hasData, _ := h.EntriesRange(base.Add(-2*time.Hour), base.Add(-1*time.Hour))
+	if deltas != nil || hasData {
+		t.Errorf("EntriesRange for a window entirely before history began = (%v, %v), want (nil, false)", deltas, hasData)
+	}
+}
+
+func TestHistory_EntriesRangeFallsBackToEarliestSnapshotAndMarksIncomplete(t *testing.T) {
+	h := NewHistory(24)
+	base := mustParse(t, "2026-09-05T10:00:00Z")
+	h.Record(base, 1.00, 50, 5, []costengine.Entry{fakeEntry("a", "b", "web", "db", 50, 1.00)})
+	h.Record(base.Add(30*time.Minute), 2.00, 100, 10, []costengine.Entry{fakeEntry("a", "b", "web", "db", 100, 2.00)})
+
+	// Requested window starts BEFORE history began (base) — must fall back to base as the
+	// baseline and report complete=false, since the portion before `base` is unobservable.
+	deltas, hasData, complete := h.EntriesRange(base.Add(-1*time.Hour), base.Add(30*time.Minute))
+	if !hasData {
+		t.Fatalf("expected hasData=true (real data exists within the window)")
+	}
+	if complete {
+		t.Errorf("expected complete=false (window starts before history began, used fallback baseline)")
+	}
+	if len(deltas) != 1 || !almostEqualHistory(deltas[0].GB, 50) {
+		t.Errorf("deltas = %+v, want one route with gb=50 (2.00-1.00 cost, 100-50 gb from the fallback baseline)", deltas)
+	}
+}
+
+func TestHistory_EntriesRangeDropsZeroDeltaRoutes(t *testing.T) {
+	h := NewHistory(24)
+	base := mustParse(t, "2026-09-05T10:00:00Z")
+	h.Record(base, 1.00, 50, 5, []costengine.Entry{
+		fakeEntry("a", "b", "web", "db", 50, 1.00),
+		fakeEntry("a", "c", "web", "cache", 5, 0.10),
+	})
+	// Second route (a->c) sees NO further traffic — must not appear as a $0 row.
+	h.Record(base.Add(30*time.Minute), 2.00, 100, 10, []costengine.Entry{
+		fakeEntry("a", "b", "web", "db", 100, 2.00),
+		fakeEntry("a", "c", "web", "cache", 5, 0.10),
+	})
+	deltas, _, _ := h.EntriesRange(base, base.Add(30*time.Minute))
+	if len(deltas) != 1 {
+		t.Fatalf("EntriesRange returned %d routes, want 1 (zero-delta route must be omitted, not shown as $0)", len(deltas))
+	}
+	if deltas[0].SrcZone != "a" || deltas[0].DstZone != "b" {
+		t.Errorf("unexpected surviving route: %+v", deltas[0])
+	}
+}
+
 func TestHistory_BucketsComputeDeltaFromCumulativeSnapshots(t *testing.T) {
 	h := NewHistory(24)
 	base := mustParse(t, "2026-09-05T10:00:00Z")
 
 	// Cumulative totals grow monotonically within the hour, as a real Prometheus counter would.
-	h.Record(base, 1.00, 50, 5)
-	h.Record(base.Add(20*time.Minute), 1.50, 75, 7)
-	h.Record(base.Add(40*time.Minute), 2.20, 110, 9)
+	h.Record(base, 1.00, 50, 5, nil)
+	h.Record(base.Add(20*time.Minute), 1.50, 75, 7, nil)
+	h.Record(base.Add(40*time.Minute), 2.20, 110, 9, nil)
 	// Cross into the next hour bucket.
-	h.Record(base.Add(65*time.Minute), 2.80, 140, 10)
+	h.Record(base.Add(65*time.Minute), 2.80, 140, 10, nil)
 
 	buckets := h.Buckets(base, base.Add(70*time.Minute), time.Hour)
 	if len(buckets) != 2 {
@@ -57,10 +161,10 @@ func TestHistory_CounterResetTreatedAsFreshStartNotNegative(t *testing.T) {
 	h := NewHistory(24)
 	base := mustParse(t, "2026-09-05T10:00:00Z")
 
-	h.Record(base, 5.00, 200, 20)
+	h.Record(base, 5.00, 200, 20, nil)
 	// Simulates an agent/collector restart mid-bucket: the cumulative counter drops back near
 	// zero because the underlying process (and its Prometheus counter) restarted.
-	h.Record(base.Add(30*time.Minute), 0.40, 15, 2)
+	h.Record(base.Add(30*time.Minute), 0.40, 15, 2, nil)
 
 	buckets := h.Buckets(base, base.Add(45*time.Minute), time.Hour)
 	if len(buckets) != 1 {
@@ -80,7 +184,7 @@ func TestHistory_CounterResetTreatedAsFreshStartNotNegative(t *testing.T) {
 func TestHistory_BucketBeforeAnySnapshotHasNoData(t *testing.T) {
 	h := NewHistory(24)
 	base := mustParse(t, "2026-09-05T10:00:00Z")
-	h.Record(base, 1.00, 50, 5)
+	h.Record(base, 1.00, 50, 5, nil)
 
 	// Ask for a range that starts well before the collector's first snapshot.
 	buckets := h.Buckets(base.Add(-3*time.Hour), base, time.Hour)
@@ -104,8 +208,8 @@ func TestHistory_PartialBucketStraddlingFirstSnapshotUsesEarliestAsFallbackBasel
 	// later once real numbers existed within it — caught via a user screen recording).
 	h := NewHistory(24)
 	firstSnap := mustParse(t, "2026-09-05T10:30:00Z")
-	h.Record(firstSnap, 1.00, 50, 5)
-	h.Record(mustParse(t, "2026-09-05T10:45:00Z"), 1.60, 80, 8)
+	h.Record(firstSnap, 1.00, 50, 5, nil)
+	h.Record(mustParse(t, "2026-09-05T10:45:00Z"), 1.60, 80, 8, nil)
 
 	buckets := h.Buckets(mustParse(t, "2026-09-05T10:00:00Z"), mustParse(t, "2026-09-05T11:00:00Z"), time.Hour)
 	if len(buckets) != 1 {
@@ -131,9 +235,9 @@ func TestHistory_PartialBucketStraddlingFirstSnapshotUsesEarliestAsFallbackBasel
 func TestHistory_BucketEntirelyAfterFirstSnapshotIsUnaffectedByFallback(t *testing.T) {
 	h := NewHistory(24)
 	base := mustParse(t, "2026-09-05T10:00:00Z")
-	h.Record(base, 1.00, 50, 5)
-	h.Record(base.Add(65*time.Minute), 2.00, 100, 10)
-	h.Record(base.Add(125*time.Minute), 3.50, 175, 17)
+	h.Record(base, 1.00, 50, 5, nil)
+	h.Record(base.Add(65*time.Minute), 2.00, 100, 10, nil)
+	h.Record(base.Add(125*time.Minute), 3.50, 175, 17, nil)
 
 	buckets := h.Buckets(base, base.Add(130*time.Minute), time.Hour)
 	if len(buckets) != 3 {
@@ -150,8 +254,8 @@ func TestHistory_BucketEntirelyAfterFirstSnapshotIsUnaffectedByFallback(t *testi
 func TestHistory_MostRecentBucketIncomplete(t *testing.T) {
 	h := NewHistory(24)
 	base := mustParse(t, "2026-09-05T10:00:00Z")
-	h.Record(base, 1.00, 50, 5)
-	h.Record(base.Add(20*time.Minute), 1.50, 75, 7)
+	h.Record(base, 1.00, 50, 5, nil)
+	h.Record(base.Add(20*time.Minute), 1.50, 75, 7, nil)
 
 	// "now" is mid-bucket — the most recent snapshot (10:20) is well before the bucket's end
 	// (11:00), so this bucket only reflects a partial hour and must be marked incomplete.
@@ -170,9 +274,9 @@ func TestHistory_MostRecentBucketIncomplete(t *testing.T) {
 func TestHistory_CompletedPastBucketMarkedComplete(t *testing.T) {
 	h := NewHistory(24)
 	base := mustParse(t, "2026-09-05T10:00:00Z")
-	h.Record(base, 1.00, 50, 5)
+	h.Record(base, 1.00, 50, 5, nil)
 	// A snapshot well past the bucket's end confirms the bucket is fully observed.
-	h.Record(base.Add(90*time.Minute), 3.00, 150, 15)
+	h.Record(base.Add(90*time.Minute), 3.00, 150, 15, nil)
 
 	buckets := h.Buckets(base, base.Add(90*time.Minute), time.Hour)
 	if len(buckets) < 1 {
@@ -187,11 +291,11 @@ func TestHistory_RecordEvictsBeyondMaxHours(t *testing.T) {
 	h := NewHistory(2) // retain only 2 hours
 	base := mustParse(t, "2026-09-05T10:00:00Z")
 
-	h.Record(base, 1.00, 50, 5)
-	h.Record(base.Add(1*time.Hour), 2.00, 100, 10)
-	h.Record(base.Add(2*time.Hour), 3.00, 150, 15)
+	h.Record(base, 1.00, 50, 5, nil)
+	h.Record(base.Add(1*time.Hour), 2.00, 100, 10, nil)
+	h.Record(base.Add(2*time.Hour), 3.00, 150, 15, nil)
 	// This should push the very first (10:00) snapshot out of the 2-hour retention window.
-	h.Record(base.Add(4*time.Hour), 5.00, 250, 25)
+	h.Record(base.Add(4*time.Hour), 5.00, 250, 25, nil)
 
 	earliest := h.EarliestSnapshot()
 	if earliest.Before(base.Add(1 * time.Hour)) {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gargkrishna730/zonetax/internal/collector"
+	"github.com/gargkrishna730/zonetax/internal/costengine"
 )
 
 func TestCosts_EmptyStoreReturnsZeroValues(t *testing.T) {
@@ -202,8 +203,8 @@ func TestHistory_ReflectsRecordedSnapshots(t *testing.T) {
 	store := &collector.Store{}
 	hist := store.History()
 	base := time.Now().UTC().Add(-90 * time.Minute).Truncate(time.Hour)
-	hist.Record(base, 1.00, 50, 5)
-	hist.Record(base.Add(45*time.Minute), 2.50, 125, 12)
+	hist.Record(base, 1.00, 50, 5, nil)
+	hist.Record(base.Add(45*time.Minute), 2.50, 125, 12, nil)
 
 	h := NewHandler(store)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/history?range=6h", nil)
@@ -228,5 +229,112 @@ func TestHistory_ReflectsRecordedSnapshots(t *testing.T) {
 	}
 	if !foundNonZeroCost {
 		t.Error("expected at least one bucket with a non-zero CrossAZCostUSD from the recorded snapshots")
+	}
+}
+
+func TestMap_DefaultRangeIs24h(t *testing.T) {
+	h := NewHandler(&collector.Store{})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/map", nil)
+	rr := httptest.NewRecorder()
+	h.Map(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var resp mapResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.RangeRequested != "24h" {
+		t.Errorf("RangeRequested = %q, want %q (default)", resp.RangeRequested, "24h")
+	}
+}
+
+func TestMap_RejectsUnsupportedRange(t *testing.T) {
+	h := NewHandler(&collector.Store{})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/map?range=3weeks", nil)
+	rr := httptest.NewRecorder()
+	h.Map(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for an unsupported range value", rr.Code)
+	}
+}
+
+func TestMap_EmptyStoreReturnsNoDataNotFabricated(t *testing.T) {
+	h := NewHandler(&collector.Store{})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/map?range=15m", nil)
+	rr := httptest.NewRecorder()
+	h.Map(rr, req)
+
+	var resp mapResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.HasData {
+		t.Error("HasData = true, want false (no snapshots recorded yet — must not fabricate data)")
+	}
+	if len(resp.Entries) != 0 {
+		t.Errorf("Entries = %d, want 0", len(resp.Entries))
+	}
+}
+
+func TestMap_CustomRangeRequiresSinceAndUntil(t *testing.T) {
+	h := NewHandler(&collector.Store{})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/map?range=custom", nil)
+	rr := httptest.NewRecorder()
+	h.Map(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 when range=custom is missing since/until", rr.Code)
+	}
+}
+
+func TestMap_CustomRangeRejectsUntilBeforeSince(t *testing.T) {
+	h := NewHandler(&collector.Store{})
+	now := time.Now().UTC()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/map?range=custom&since="+now.Format(time.RFC3339)+"&until="+now.Add(-time.Hour).Format(time.RFC3339), nil)
+	rr := httptest.NewRecorder()
+	h.Map(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 when until is before since", rr.Code)
+	}
+}
+
+// TestMap_ReflectsRecordedRouteDeltas is an end-to-end check that the API layer correctly
+// surfaces collector.History's per-route EntriesRange math (already unit-tested in depth in
+// internal/collector/history_test.go) rather than re-verifying that math here.
+func TestMap_ReflectsRecordedRouteDeltas(t *testing.T) {
+	store := &collector.Store{}
+	hist := store.History()
+	base := time.Now().UTC().Add(-10 * time.Minute)
+	hist.Record(base, 1.00, 50, 5, []costengine.Entry{
+		{SrcZone: "us-east-1a", DstZone: "us-east-1b", SrcNamespace: "ns", SrcWorkload: "web", DstNamespace: "ns", DstWorkload: "db", GB: 40, CostUSD: 0.80},
+	})
+	hist.Record(base.Add(5*time.Minute), 1.60, 80, 8, []costengine.Entry{
+		{SrcZone: "us-east-1a", DstZone: "us-east-1b", SrcNamespace: "ns", SrcWorkload: "web", DstNamespace: "ns", DstWorkload: "db", GB: 70, CostUSD: 1.40},
+	})
+
+	h := NewHandler(store)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/map?range=15m", nil)
+	rr := httptest.NewRecorder()
+	h.Map(rr, req)
+
+	var resp mapResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if !resp.HasData {
+		t.Fatal("expected HasData=true given real recorded snapshots within the window")
+	}
+	if len(resp.Entries) != 1 {
+		t.Fatalf("Entries = %d, want 1", len(resp.Entries))
+	}
+	if got, want := resp.Entries[0].CostUSD, 0.60; got < want-0.001 || got > want+0.001 {
+		t.Errorf("Entries[0].CostUSD = %v, want ~%v (1.60-1.00 delta)", got, want)
+	}
+	if resp.TotalCrossAZCostUSD < 0.599 || resp.TotalCrossAZCostUSD > 0.601 {
+		t.Errorf("TotalCrossAZCostUSD = %v, want ~0.60", resp.TotalCrossAZCostUSD)
 	}
 }

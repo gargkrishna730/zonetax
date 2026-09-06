@@ -114,7 +114,7 @@ func (s *Store) set(summary costengine.Summary, err error) {
 		}
 		s.latest = summary
 		s.updated = now
-		s.ensureHistoryLocked().Record(now, summary.TotalCrossAZCost, summary.TotalCrossAZGB, summary.TotalSameAZGB)
+		s.ensureHistoryLocked().Record(now, summary.TotalCrossAZCost, summary.TotalCrossAZGB, summary.TotalSameAZGB, summary.Entries)
 	}
 }
 

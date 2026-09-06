@@ -225,6 +225,139 @@ var supportedRanges = map[string]time.Duration{
 	"7d":  7 * 24 * time.Hour,
 }
 
+// mapRanges additionally includes 15m — the shortest window offered by the Cross-AZ Service Map
+// toolbar's range picker (internal/api's own /history chart never asked for anything finer than
+// 1h, so this is a strict superset kept separate rather than changing supportedRanges' existing
+// meaning for that endpoint).
+var mapRanges = map[string]time.Duration{
+	"15m": 15 * time.Minute,
+	"1h":  time.Hour,
+	"6h":  6 * time.Hour,
+	"24h": 24 * time.Hour,
+	"7d":  7 * 24 * time.Hour,
+}
+
+// mapEntry is one route's real, observed cost/traffic delta for the requested time window —
+// the wire format for GET /api/v1/map.
+type mapEntry struct {
+	SrcZone      string  `json:"src_zone"`
+	DstZone      string  `json:"dst_zone"`
+	SrcNamespace string  `json:"src_namespace"`
+	SrcWorkload  string  `json:"src_workload"`
+	DstNamespace string  `json:"dst_namespace"`
+	DstWorkload  string  `json:"dst_workload"`
+	GB           float64 `json:"gb"`
+	CostUSD      float64 `json:"cost_usd"`
+}
+
+// mapResponse is the wire format for GET /api/v1/map — the Cross-AZ Service Map's primary data
+// source. Unlike /api/v1/costs (which only ever reports cumulative-since-restart totals), this
+// endpoint answers "what happened in THIS specific time window" — required for the map's
+// 15m/1h/6h/24h/7d/custom range picker to actually rebuild routes/nodes/totals, not just relabel
+// the same always-cumulative numbers.
+type mapResponse struct {
+	RangeRequested string `json:"range_requested"`
+	RangeStartUTC  string `json:"range_start_utc"`
+	RangeEndUTC    string `json:"range_end_utc"`
+	ServerTimeUTC  string `json:"server_time_utc"`
+	Cloud          string `json:"cloud"`
+	Region         string `json:"region"`
+	// HasData=false: no snapshot data exists yet to answer this query at all (collector just
+	// started, or the entire window is before any data was ever recorded).
+	HasData bool `json:"has_data"`
+	// Complete=false: real data exists, but the window is only PARTIALLY observed — either it
+	// starts before this collector's history began (fallback baseline used, undercounting the
+	// unobservable portion) or it extends into the current, still-in-progress moment. The
+	// entries/totals below are real, not fabricated, but do not represent the FULL requested
+	// window — the UI must show this distinction, never silently present a partial number as
+	// if it were the complete period's total.
+	Complete               bool       `json:"complete"`
+	PricePerGBUSD          float64    `json:"price_per_gb_usd"`
+	PricePerGBDirectionUSD float64    `json:"price_per_gb_direction_usd"`
+	Entries                []mapEntry `json:"entries"`
+	TotalCrossAZGB         float64    `json:"total_cross_az_gb"`
+	TotalCrossAZCostUSD    float64    `json:"total_cross_az_cost_usd"`
+}
+
+// parseRFC3339 parses a required RFC3339 query parameter, returning ok=false if missing/invalid.
+func parseRFC3339(v string) (time.Time, bool) {
+	if v == "" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339, v)
+	return t, err == nil
+}
+
+// Map handles GET /api/v1/map?range=15m|1h|6h|24h|7d|custom[&since=RFC3339&until=RFC3339],
+// returning the real observed per-route cost/traffic delta for the requested window — the data
+// source for the Cross-AZ Service Map's time-range picker. For "custom", since/until are
+// required and must be a valid RFC3339 range with until > since; any other value for `range`
+// (or a missing one) uses the corresponding fixed duration ending now.
+func (h *Handler) Map(w http.ResponseWriter, r *http.Request) {
+	rangeParam := r.URL.Query().Get("range")
+	if rangeParam == "" {
+		rangeParam = "24h"
+	}
+
+	now := time.Now().UTC()
+	var since time.Time
+	if rangeParam == "custom" {
+		s, sOK := parseRFC3339(r.URL.Query().Get("since"))
+		u, uOK := parseRFC3339(r.URL.Query().Get("until"))
+		if !sOK || !uOK || !u.After(s) {
+			http.Error(w, `invalid custom range — "since" and "until" must be RFC3339 timestamps with until after since`, http.StatusBadRequest)
+			return
+		}
+		since, now = s.UTC(), u.UTC()
+	} else {
+		dur, ok := mapRanges[rangeParam]
+		if !ok {
+			http.Error(w, `invalid "range" — supported values: 15m, 1h, 6h, 24h, 7d, custom`, http.StatusBadRequest)
+			return
+		}
+		since = now.Add(-dur)
+	}
+
+	summary, _, _ := h.store.Latest()
+	deltas, hasData, complete := h.store.History().EntriesRange(since, now)
+
+	resp := mapResponse{
+		RangeRequested:         rangeParam,
+		RangeStartUTC:          since.Format(time.RFC3339),
+		RangeEndUTC:            now.Format(time.RFC3339),
+		ServerTimeUTC:          time.Now().UTC().Format(time.RFC3339),
+		Cloud:                  summary.Cloud,
+		Region:                 summary.Region,
+		HasData:                hasData,
+		Complete:               complete,
+		PricePerGBUSD:          summary.EffectivePricePerGB,
+		PricePerGBDirectionUSD: summary.PricePerGBDirection,
+		Entries:                make([]mapEntry, 0, len(deltas)),
+	}
+	for _, d := range deltas {
+		resp.Entries = append(resp.Entries, mapEntry{
+			SrcZone: d.SrcZone, DstZone: d.DstZone,
+			SrcNamespace: d.SrcNamespace, SrcWorkload: d.SrcWorkload,
+			DstNamespace: d.DstNamespace, DstWorkload: d.DstWorkload,
+			GB: d.GB, CostUSD: d.CostUSD,
+		})
+		resp.TotalCrossAZGB += d.GB
+		resp.TotalCrossAZCostUSD += d.CostUSD
+	}
+	sortMapEntriesByCostDesc(resp.Entries)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func sortMapEntriesByCostDesc(entries []mapEntry) {
+	for i := 1; i < len(entries); i++ {
+		for j := i; j > 0 && entries[j].CostUSD > entries[j-1].CostUSD; j-- {
+			entries[j], entries[j-1] = entries[j-1], entries[j]
+		}
+	}
+}
+
 // History handles GET /api/v1/history?range=1h|6h|24h|7d (default 24h), returning hourly
 // cost/traffic delta buckets derived from collector.History's cumulative-total snapshots. This
 // is in-memory history bounded to how long THIS collector process has been running (see
