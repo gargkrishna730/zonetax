@@ -2,8 +2,8 @@
 // per-sample deltas suitable for feeding a monotonic Prometheus counter's Add().
 //
 // This exists to fix a real accuracy bug found comparing ZoneTax's tracked cost against the
-// real AWS bill (Cost Explorer's DataTransfer-Regional-Bytes line item) on solrn-dev: ZoneTax
-// reported roughly 80x the real cross-AZ spend. Root cause: /proc/net/nf_conntrack's `bytes=`
+// real AWS bill (Cost Explorer's DataTransfer-Regional-Bytes line item) on a live test cluster:
+// ZoneTax reported roughly 80x the real cross-AZ spend. Root cause: /proc/net/nf_conntrack's `bytes=`
 // field is the TOTAL bytes transferred over that connection's entire lifetime so far, not bytes
 // since the last sample. The agent samples every 15s and was calling
 // metrics.CrossAZBytesTotal.Add(flow.OrigBytes) directly — for any connection that stays open

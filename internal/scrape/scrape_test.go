@@ -63,8 +63,8 @@ func TestTarget_URL(t *testing.T) {
 	}
 }
 
-// TestScrapeAll_ParsesRealPrometheusTextFormat is a regression test for a real bug found
-// deploying to solrn-dev: prometheus/common v0.71+ requires model.NameValidationScheme to be
+// TestScrapeAll_ParsesRealPrometheusTextFormat is a regression test for a real bug found while
+// deploying to a live test cluster: prometheus/common v0.71+ requires model.NameValidationScheme to be
 // set globally before expfmt.TextParser can be used, or TextToMetricFamilies panics. Unit tests
 // that only construct dto.MetricFamily structs by hand (as costengine's tests do) never
 // exercise that code path — this test hits a real HTTP server serving real Prometheus text

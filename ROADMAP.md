@@ -9,11 +9,11 @@ Scope: AWS/EKS first. Conntrack-based sampling for MVP (eBPF is a possible v2).
       validation against a real multi-AZ cluster is still pending — see "Known limitations" below.
 - [x] **M2** — Cost engine: versioned AWS pricing table (YAML), collector aggregates AZ-pair bytes
       into $ cost, REST API to query current/historical spend. Deployed and validated live against
-      solrn-dev — see "Known limitations" below.
+      a test EKS cluster — see "Known limitations" below.
 - [x] **M3** — UI: interactive zone-to-zone traffic map + top-offenders table (namespace/workload
       breakdown). Served by the collector via Go embed.FS at "/", polling /api/v1/costs +
       /api/v1/top every 10s. Iterated five times on real user feedback against the live
-      solrn-dev dashboard:
+      test dashboard:
       1. Two real bugs: cost math only counted AWS's per-direction rate (2x undercounted vs the
          real bill, since cross-AZ GB is billed at both ends); the zone-only Sankey graph crashed
          ("circular link") on bidirectional zone traffic, a common case, silently blanking the
@@ -46,7 +46,7 @@ Scope: AWS/EKS first. Conntrack-based sampling for MVP (eBPF is a possible v2).
          gitignored, never committed, to prevent drift from source); CI's build-test job builds
          the UI before `go build ./...` for the same reason. Verified with a real headless
          Chromium (Playwright, driven manually since the browser tool can't reach localhost)
-         against the live solrn-dev collector via a Vite dev-server API proxy: confirmed actual
+         against the live test-cluster collector via a Vite dev-server API proxy: confirmed actual
          node drag (caught and fixed two real bugs this way — hidden connection Handles were
          still catching pointer events and stealing drag gestures; nodes were plain memoized
          props with no onNodesChange wiring, so ReactFlow silently ignored drag output entirely),
@@ -74,7 +74,7 @@ Scope: AWS/EKS first. Conntrack-based sampling for MVP (eBPF is a possible v2).
       cost). Fixed with a new `internal/deltatrack` package (6 unit tests) that tracks
       last-seen-cumulative-bytes per connection and emits true per-sample deltas, handling
       counter resets (connection restarts) by treating the post-reset value as a fresh delta
-      rather than a negative number. Deployed and re-verified against live `solrn-dev` data:
+      rather than a negative number. Deployed and re-verified against live test-cluster data:
       post-fix extrapolated rate came down to ~$8.35/day over a real 10-minute sample — still not
       an exact match to the ~$2.13/day AWS figure (that comparison itself has real noise: AWS's
       number is account-wide across all resources, not just this EKS cluster, and a 10-minute
@@ -115,9 +115,9 @@ Scope: AWS/EKS first. Conntrack-based sampling for MVP (eBPF is a possible v2).
 
 ## Known limitations (post-M1)
 
-- **Validated against a live multi-AZ cluster (solrn-dev, 2026-09-02).** Deployed via Helm to a
+- **Validated against a live multi-AZ cluster (test environment, 2026-09-02).** Deployed via Helm to a
   real 3-AZ EKS cluster; confirmed real cross-AZ byte counts attributed correctly to actual
-  workloads (e.g. `solrn-aura-backend-api-dev` us-east-1c -> us-east-1a). Two real issues were
+  workloads (e.g. a backend API workload us-east-1c -> us-east-1a). Two real issues were
   found and fixed during validation, both now baked into the Helm chart:
   1. `net.netfilter.nf_conntrack_acct` was disabled by default on nodes (EKS AL2023), so byte
      counts came back as 0 — fixed with a privileged init container that sets the sysctl

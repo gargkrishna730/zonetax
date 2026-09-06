@@ -51,7 +51,8 @@ func TestTop_LimitsAndSortsByCoreDescending(t *testing.T) {
 	}
 }
 
-// TestTop_ResponseIncludesTotals is a regression test for a bug found deploying to solrn-dev:
+// TestTop_ResponseIncludesTotals is a regression test for a bug found while deploying to a live
+// test cluster:
 // the /api/v1/top handler built its costsResponse without setting the Totals field, so every
 // response reported cross_az_cost_usd/cross_az_gb/price_per_gb_usd as 0 regardless of the real
 // values — misleading for any client (CLI, UI) trusting the totals alongside the entries list.
