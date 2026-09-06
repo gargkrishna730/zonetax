@@ -319,7 +319,17 @@ func (h *Handler) Map(w http.ResponseWriter, r *http.Request) {
 	}
 
 	summary, _, _ := h.store.Latest()
-	deltas, hasData, complete := h.store.History().EntriesRange(since, now)
+	// A window ending at "now" (the exact request instant) will essentially never exactly match
+	// a snapshot recorded on a periodic cadence — allow up to 2x the collector's real scrape
+	// interval of staleness before calling the window "incomplete", so a continuously-running,
+	// up-to-date collector correctly reports complete=true instead of permanently appearing
+	// stale. Falls back to a conservative 60s floor if ScrapeInterval hasn't been set yet (e.g.
+	// a fresh Store before Run() has started, or in unit tests using a zero-value Store).
+	freshnessTolerance := 2 * h.store.ScrapeInterval()
+	if freshnessTolerance < 60*time.Second {
+		freshnessTolerance = 60 * time.Second
+	}
+	deltas, hasData, complete := h.store.History().EntriesRange(since, now, freshnessTolerance)
 
 	resp := mapResponse{
 		RangeRequested:         rangeParam,

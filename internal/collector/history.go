@@ -108,7 +108,19 @@ type RouteDelta struct {
 // snapshot exists at-or-before `since`, the earliest available snapshot is used instead,
 // under-counting the unobservable portion before history began rather than fabricating a zero
 // baseline — callers must treat that result as INCOMPLETE (partial), not a full window's total.
-func (h *History) EntriesRange(since, now time.Time) (deltas []RouteDelta, hasData bool, complete bool) {
+//
+// freshnessTolerance bounds how "complete" is judged for a window ending at (or near) the
+// current wall-clock moment: unlike Buckets()'s hour-aligned boundaries (which are either a
+// fixed past instant or the legitimately-in-progress current hour), `now` here is an exact
+// request timestamp that will almost NEVER exactly match a snapshot recorded on a periodic
+// cadence — a real bug found live: a collector running continuously for 3+ hours with fresh
+// 30s-interval snapshots still permanently showed "Incomplete window" because the strict
+// `!now.After(latestSnapshot)` check requires the latest snapshot to be at-or-after the EXACT
+// request instant, which essentially never happens. The fix: treat the window as complete if
+// the latest snapshot is within `freshnessTolerance` of `now`, not only if it's later than now.
+// Pass 0 to require an exact match (preserves the old, stricter behavior for tests/callers that
+// want it); real callers should pass a small multiple of the collector's scrape interval.
+func (h *History) EntriesRange(since, now time.Time, freshnessTolerance time.Duration) (deltas []RouteDelta, hasData bool, complete bool) {
 	if len(h.snaps) == 0 {
 		return nil, false, false
 	}
@@ -159,7 +171,8 @@ func (h *History) EntriesRange(since, now time.Time) (deltas []RouteDelta, hasDa
 			GB: gbDelta, CostUSD: costDelta,
 		})
 	}
-	complete = !usedFallback && !now.After(mostRecentSnapshotTime(h.snaps))
+	staleness := now.Sub(mostRecentSnapshotTime(h.snaps))
+	complete = !usedFallback && staleness <= freshnessTolerance
 	return deltas, true, complete
 }
 

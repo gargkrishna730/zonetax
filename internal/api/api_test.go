@@ -338,3 +338,38 @@ func TestMap_ReflectsRecordedRouteDeltas(t *testing.T) {
 		t.Errorf("TotalCrossAZCostUSD = %v, want ~0.60", resp.TotalCrossAZCostUSD)
 	}
 }
+
+// TestMap_FreshContinuousCollectionReportsComplete is a regression test for a real bug reported
+// live: a collector that had been running continuously for hours, with the latest real snapshot
+// only ~26 seconds old (well within its 30s scrape interval), still permanently showed
+// complete=false — because the underlying check compared the latest snapshot against the EXACT
+// wall-clock request instant, which essentially never matches a periodically-recorded snapshot.
+func TestMap_FreshContinuousCollectionReportsComplete(t *testing.T) {
+	store := &collector.Store{}
+	hist := store.History()
+	// Earliest snapshot must be well BEFORE the requested window's start (here: 15m), so this
+	// test exercises only the freshness-tolerance path, not the separate fallback-baseline
+	// incompleteness path (a window starting before history began is correctly incomplete for
+	// an unrelated reason - see TestHistory_EntriesRangeFallsBackToEarliestSnapshotAndMarksIncomplete).
+	base := time.Now().UTC().Add(-1 * time.Hour)
+	hist.Record(base, 1.00, 50, 5, []costengine.Entry{
+		{SrcZone: "us-east-1a", DstZone: "us-east-1b", SrcNamespace: "ns", SrcWorkload: "web", DstNamespace: "ns", DstWorkload: "db", GB: 40, CostUSD: 0.80},
+	})
+	// Most recent snapshot lands well within a realistic scrape cadence of "now".
+	hist.Record(time.Now().UTC().Add(-20*time.Second), 1.60, 80, 8, []costengine.Entry{
+		{SrcZone: "us-east-1a", DstZone: "us-east-1b", SrcNamespace: "ns", SrcWorkload: "web", DstNamespace: "ns", DstWorkload: "db", GB: 70, CostUSD: 1.40},
+	})
+
+	h := NewHandler(store)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/map?range=15m", nil)
+	rr := httptest.NewRecorder()
+	h.Map(rr, req)
+
+	var resp mapResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if !resp.Complete {
+		t.Error("Complete = false, want true — a snapshot only ~20s old from a continuously-running collector must not be treated as stale/incomplete")
+	}
+}

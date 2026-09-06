@@ -38,7 +38,7 @@ func TestHistory_EntriesRangeComputesPerRouteDelta(t *testing.T) {
 		fakeEntry("us-east-1a", "us-east-1c", "web", "cache", 20, 0.40), // +10gb / +$0.20
 	})
 
-	deltas, hasData, complete := h.EntriesRange(base, base.Add(30*time.Minute))
+	deltas, hasData, complete := h.EntriesRange(base, base.Add(30*time.Minute), 0)
 	if !hasData || !complete {
 		t.Fatalf("EntriesRange: hasData=%v complete=%v, want true/true (window exactly spans two real snapshots)", hasData, complete)
 	}
@@ -59,7 +59,7 @@ func TestHistory_EntriesRangeComputesPerRouteDelta(t *testing.T) {
 
 func TestHistory_EntriesRangeNoSnapshotsYet(t *testing.T) {
 	h := NewHistory(24)
-	deltas, hasData, complete := h.EntriesRange(mustParse(t, "2026-09-05T10:00:00Z"), mustParse(t, "2026-09-05T11:00:00Z"))
+	deltas, hasData, complete := h.EntriesRange(mustParse(t, "2026-09-05T10:00:00Z"), mustParse(t, "2026-09-05T11:00:00Z"), 0)
 	if deltas != nil || hasData || complete {
 		t.Errorf("EntriesRange with no snapshots = (%v, %v, %v), want (nil, false, false)", deltas, hasData, complete)
 	}
@@ -71,7 +71,7 @@ func TestHistory_EntriesRangeWindowBeforeAnySnapshotHasNoData(t *testing.T) {
 	h.Record(base, 1.00, 50, 5, []costengine.Entry{fakeEntry("a", "b", "web", "db", 50, 1.00)})
 
 	// Entire requested window is before the only snapshot exists.
-	deltas, hasData, _ := h.EntriesRange(base.Add(-2*time.Hour), base.Add(-1*time.Hour))
+	deltas, hasData, _ := h.EntriesRange(base.Add(-2*time.Hour), base.Add(-1*time.Hour), 0)
 	if deltas != nil || hasData {
 		t.Errorf("EntriesRange for a window entirely before history began = (%v, %v), want (nil, false)", deltas, hasData)
 	}
@@ -85,7 +85,7 @@ func TestHistory_EntriesRangeFallsBackToEarliestSnapshotAndMarksIncomplete(t *te
 
 	// Requested window starts BEFORE history began (base) — must fall back to base as the
 	// baseline and report complete=false, since the portion before `base` is unobservable.
-	deltas, hasData, complete := h.EntriesRange(base.Add(-1*time.Hour), base.Add(30*time.Minute))
+	deltas, hasData, complete := h.EntriesRange(base.Add(-1*time.Hour), base.Add(30*time.Minute), 0)
 	if !hasData {
 		t.Fatalf("expected hasData=true (real data exists within the window)")
 	}
@@ -109,12 +109,40 @@ func TestHistory_EntriesRangeDropsZeroDeltaRoutes(t *testing.T) {
 		fakeEntry("a", "b", "web", "db", 100, 2.00),
 		fakeEntry("a", "c", "web", "cache", 5, 0.10),
 	})
-	deltas, _, _ := h.EntriesRange(base, base.Add(30*time.Minute))
+	deltas, _, _ := h.EntriesRange(base, base.Add(30*time.Minute), 0)
 	if len(deltas) != 1 {
 		t.Fatalf("EntriesRange returned %d routes, want 1 (zero-delta route must be omitted, not shown as $0)", len(deltas))
 	}
 	if deltas[0].SrcZone != "a" || deltas[0].DstZone != "b" {
 		t.Errorf("unexpected surviving route: %+v", deltas[0])
+	}
+}
+
+// TestHistory_EntriesRangeFreshnessToleranceFixesPermanentIncompleteBug is a regression test for
+// a real bug reported live: a collector running continuously for hours, with fresh snapshots
+// every 30s, permanently showed "Incomplete window" for EVERY range because `now` (the exact
+// request instant) essentially never exactly equals a periodically-recorded snapshot's
+// timestamp — the old strict `!now.After(latest)` check required an exact-or-later match. With
+// freshnessTolerance=0 (the old behavior) this is still expected to report incomplete; with a
+// realistic tolerance (e.g. covering the scrape interval) it must correctly report complete.
+func TestHistory_EntriesRangeFreshnessToleranceFixesPermanentIncompleteBug(t *testing.T) {
+	h := NewHistory(24)
+	base := mustParse(t, "2026-09-06T12:00:00Z")
+	h.Record(base, 1.00, 50, 5, []costengine.Entry{fakeEntry("a", "b", "web", "db", 50, 1.00)})
+	// Latest real snapshot lands 26 seconds before the query's "now" - realistic for a 30s
+	// scrape interval where the request doesn't land exactly on a snapshot tick.
+	latestSnapAt := base.Add(30 * time.Minute)
+	h.Record(latestSnapAt, 2.00, 100, 10, []costengine.Entry{fakeEntry("a", "b", "web", "db", 100, 2.00)})
+	queryNow := latestSnapAt.Add(26 * time.Second)
+
+	_, _, completeStrict := h.EntriesRange(base, queryNow, 0)
+	if completeStrict {
+		t.Error("with freshnessTolerance=0, a 26s-stale snapshot should NOT be reported complete (sanity check on the old strict behavior)")
+	}
+
+	_, _, completeTolerant := h.EntriesRange(base, queryNow, 60*time.Second)
+	if !completeTolerant {
+		t.Error("with a realistic 60s freshnessTolerance, a 26s-stale snapshot from a continuously-running collector SHOULD be reported complete — this is the exact bug: a healthy, up-to-date collector permanently showing 'incomplete'")
 	}
 }
 
