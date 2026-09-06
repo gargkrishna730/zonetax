@@ -97,10 +97,11 @@ function RangeFilterGroup({ range }: { range: RangeFilterDef }) {
               Min
               <input
                 type="number"
+                min={0}
                 step={range.step ?? 0.01}
                 value={range.min ?? ''}
                 placeholder="any"
-                onChange={(e) => range.onMinChange(e.target.value === '' ? null : Number(e.target.value))}
+                onChange={(e) => range.onMinChange(e.target.value === '' ? null : Math.max(0, Number(e.target.value)))}
               />
               {range.unit}
             </label>
@@ -108,10 +109,11 @@ function RangeFilterGroup({ range }: { range: RangeFilterDef }) {
               Max
               <input
                 type="number"
+                min={0}
                 step={range.step ?? 0.01}
                 value={range.max ?? ''}
                 placeholder="any"
-                onChange={(e) => range.onMaxChange(e.target.value === '' ? null : Number(e.target.value))}
+                onChange={(e) => range.onMaxChange(e.target.value === '' ? null : Math.max(0, Number(e.target.value)))}
               />
               {range.unit}
             </label>

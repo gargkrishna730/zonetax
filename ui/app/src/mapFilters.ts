@@ -72,7 +72,9 @@ export function isFiltersEmpty(f: MapFilters): boolean {
 /** Number of active filter chips — used both for "Clear all" visibility and to tell a user how
  * many constraints are currently narrowing the map. Multi-select group sizes each count once
  * per selected value (matching how each is rendered as its own removable chip), range filters
- * count once each if set. */
+ * count once each if set to a POSITIVE value — a non-positive bound is treated as unset (see
+ * matchesFilters' doc), so it must not count as active here either, or the chip count/"Reset"
+ * visibility would disagree with what's actually being filtered. */
 export function countActiveFilters(f: MapFilters): number {
   return (
     f.zones.size +
@@ -81,14 +83,21 @@ export function countActiveFilters(f: MapFilters): number {
     f.srcWorkloads.size +
     f.dstWorkloads.size +
     f.routes.size +
-    (f.costMin !== null ? 1 : 0) +
-    (f.costMax !== null ? 1 : 0) +
-    (f.trafficMinGB !== null ? 1 : 0) +
-    (f.trafficMaxGB !== null ? 1 : 0)
+    (f.costMin !== null && f.costMin > 0 ? 1 : 0) +
+    (f.costMax !== null && f.costMax > 0 ? 1 : 0) +
+    (f.trafficMinGB !== null && f.trafficMinGB > 0 ? 1 : 0) +
+    (f.trafficMaxGB !== null && f.trafficMaxGB > 0 ? 1 : 0)
   )
 }
 
 /** True if entry `e` matches every active constraint in `f`. Cost/traffic ranges are inclusive.
+ * A non-positive min/max (<=0) is treated as UNSET, not as an active "at least $0" constraint —
+ * cost/traffic can never legitimately be negative, so a stray negative bound (e.g. from an
+ * arrow-key/scroll-wheel nudge on an empty number input — a real bug caught via browser testing:
+ * one ArrowDown press in an empty field produced "-0.01" and silently became a permanently-true,
+ * misleadingly-"active" filter chip) must not silently become a no-op filter that LOOKS active
+ * but changes nothing. See FilterPanel.tsx's `min={0}` + clamped onChange for the input-level
+ * fix; this is the defense-in-depth check for any other caller of matchesFilters/applyFilters.
  * An entry matches the zones/namespaces/workloads groups if EITHER its source or destination
  * side is in the selected set (an SRE filtering by "us-east-1a" wants every route touching that
  * zone, not just ones where it's specifically the source). */
@@ -99,10 +108,10 @@ export function matchesFilters(e: MapEntry, f: MapFilters): boolean {
   if (f.srcWorkloads.size > 0 && !f.srcWorkloads.has(srcWorkloadKey(e))) return false
   if (f.dstWorkloads.size > 0 && !f.dstWorkloads.has(dstWorkloadKey(e))) return false
   if (f.routes.size > 0 && !f.routes.has(routeKey(e))) return false
-  if (f.costMin !== null && e.cost_usd < f.costMin) return false
-  if (f.costMax !== null && e.cost_usd > f.costMax) return false
-  if (f.trafficMinGB !== null && e.gb < f.trafficMinGB) return false
-  if (f.trafficMaxGB !== null && e.gb > f.trafficMaxGB) return false
+  if (f.costMin !== null && f.costMin > 0 && e.cost_usd < f.costMin) return false
+  if (f.costMax !== null && f.costMax > 0 && e.cost_usd > f.costMax) return false
+  if (f.trafficMinGB !== null && f.trafficMinGB > 0 && e.gb < f.trafficMinGB) return false
+  if (f.trafficMaxGB !== null && f.trafficMaxGB > 0 && e.gb > f.trafficMaxGB) return false
   return true
 }
 

@@ -238,10 +238,10 @@ export default function App() {
     addAll(filters.srcWorkloads, 'src', workloadLabelOf, (v) => toggleInSet('srcWorkloads', v))
     addAll(filters.dstWorkloads, 'dst', workloadLabelOf, (v) => toggleInSet('dstWorkloads', v))
     addAll(filters.routes, 'route', (v) => v.replace('>', '→'), (v) => toggleInSet('routes', v))
-    if (filters.costMin !== null) chips.push({ key: 'costMin', label: `cost ≥ $${filters.costMin}`, onRemove: () => setFilters((f) => ({ ...f, costMin: null })) })
-    if (filters.costMax !== null) chips.push({ key: 'costMax', label: `cost ≤ $${filters.costMax}`, onRemove: () => setFilters((f) => ({ ...f, costMax: null })) })
-    if (filters.trafficMinGB !== null) chips.push({ key: 'trafficMin', label: `traffic ≥ ${filters.trafficMinGB}GB`, onRemove: () => setFilters((f) => ({ ...f, trafficMinGB: null })) })
-    if (filters.trafficMaxGB !== null) chips.push({ key: 'trafficMax', label: `traffic ≤ ${filters.trafficMaxGB}GB`, onRemove: () => setFilters((f) => ({ ...f, trafficMaxGB: null })) })
+    if (filters.costMin !== null && filters.costMin > 0) chips.push({ key: 'costMin', label: `cost ≥ $${filters.costMin}`, onRemove: () => setFilters((f) => ({ ...f, costMin: null })) })
+    if (filters.costMax !== null && filters.costMax > 0) chips.push({ key: 'costMax', label: `cost ≤ $${filters.costMax}`, onRemove: () => setFilters((f) => ({ ...f, costMax: null })) })
+    if (filters.trafficMinGB !== null && filters.trafficMinGB > 0) chips.push({ key: 'trafficMin', label: `traffic ≥ ${filters.trafficMinGB}GB`, onRemove: () => setFilters((f) => ({ ...f, trafficMinGB: null })) })
+    if (filters.trafficMaxGB !== null && filters.trafficMaxGB > 0) chips.push({ key: 'trafficMax', label: `traffic ≤ ${filters.trafficMaxGB}GB`, onRemove: () => setFilters((f) => ({ ...f, trafficMaxGB: null })) })
     return chips
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters, workloadLabelOf])

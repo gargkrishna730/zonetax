@@ -89,6 +89,15 @@ describe('matchesFilters', () => {
     expect(matchesFilters(e, f)).toBe(false)
   })
 
+  it('treats a non-positive min/max as unset — regression test for a real bug where an ArrowDown press in an empty range input produced -0.01 and silently became a permanently-true "active" filter chip', () => {
+    const e = entry({ cost_usd: 0.2, gb: 10 })
+    const f = emptyFilters()
+    f.costMin = -0.01
+    f.trafficMinGB = -0.01
+    expect(matchesFilters(e, f)).toBe(true) // must not be excluded by a negative "floor"
+    expect(countActiveFilters(f)).toBe(0) // must not count as an active filter either
+  })
+
   it('applies srcWorkloads/dstWorkloads as direction-specific, unlike the general workloads group', () => {
     const e = entry()
     const f = emptyFilters()
