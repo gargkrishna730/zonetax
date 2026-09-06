@@ -302,9 +302,20 @@ export default function App() {
       const marker: EdgeMarker = { type: MarkerType.ArrowClosed, color, width: 22, height: 22 }
       const srcNode = flowGraph.nodes.find((n) => n.id === pair.srcId)
       const dstNode = flowGraph.nodes.find((n) => n.id === pair.dstId)
+      // Zone view: clicking a route opens the drill-down panel (richer — a single zone-pair can
+      // span many real workload pairs, and the panel is a full sortable/clickable list, not just
+      // a route-details snapshot). Workload view: a route IS already the most granular thing, so
+      // clicking it opens RouteDetailsPanel directly instead. These are deliberately mutually
+      // exclusive per click — a real bug, caught via a live screenshot, had both panels able to
+      // be open simultaneously in zone view, with RouteDetailsPanel's higher z-index silently
+      // and completely hiding the drill-down panel underneath it, making the drill-down feature
+      // unreachable by clicking a zone route. Also fixes a second issue found alongside it:
+      // workload-view edges previously had NO click handler at all (onSelect was zone-view-only),
+      // so clicking a route there did nothing.
       const onSelect =
         viewMode === 'zone'
           ? () => {
+              setSelectedRoute(null)
               setDrillDown({
                 srcLabel: srcNode?.label ?? pair.srcId,
                 dstLabel: dstNode?.label ?? pair.dstId,
@@ -312,10 +323,14 @@ export default function App() {
                 totalGb: pair.gb,
                 pairs: buildWorkloadPairBreakdown(pair.entries),
               })
-              const first = pair.entries[0]
-              if (first) setSelectedRoute(first)
             }
-          : undefined
+          : () => {
+              const first = pair.entries[0]
+              if (first) {
+                setDrillDown(null)
+                setSelectedRoute(first)
+              }
+            }
       const dimmed = isNodeDimmed(pair.srcId) || isNodeDimmed(pair.dstId)
       return {
         id: `${pair.srcId}>${pair.dstId}`,
@@ -498,7 +513,10 @@ export default function App() {
             entries={topOffenders}
             totalCrossAZCostUSD={summary.totalCostUSD}
             range={mapRange}
-            onSelectRoute={(e) => setSelectedRoute(e)}
+            onSelectRoute={(e) => {
+              setDrillDown(null)
+              setSelectedRoute(e)
+            }}
             collapsed={offendersCollapsed}
             onToggleCollapsed={() => setOffendersCollapsed((c) => !c)}
           />
