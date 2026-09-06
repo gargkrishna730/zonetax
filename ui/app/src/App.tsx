@@ -163,8 +163,18 @@ export default function App() {
     [filteredEntries, pairFilter],
   )
   const { shown: modeShownEntries, hiddenCount, totalRoutes } = useMemo(
-    () => applyMapMode(pairScopedEntries, mapMode, maxConnections),
-    [pairScopedEntries, mapMode, maxConnections],
+    () =>
+      applyMapMode(
+        pairScopedEntries,
+        mapMode,
+        maxConnections,
+        // Route granularity must match what's actually drawn for the ACTIVE view — zone-pair in
+        // Zone->Zone, workload-pair in Workload->Workload. See mapModes.ts's doc for the real
+        // bug this fixes: capping was always keyed by zone-pair, silently leaving the Workload
+        // view's much larger route count completely uncapped.
+        viewMode === 'zone' ? (e) => e.src_zone + '>' + e.dst_zone : (e) => srcWorkloadKey(e) + '>' + dstWorkloadKey(e),
+      ),
+    [pairScopedEntries, mapMode, maxConnections, viewMode],
   )
 
   const summary = useMemo(() => computeMapSummary(filteredEntries), [filteredEntries])

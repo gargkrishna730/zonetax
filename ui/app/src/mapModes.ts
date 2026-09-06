@@ -6,26 +6,43 @@
 import type { MapEntry } from './types'
 import { srcWorkloadKey, dstWorkloadKey } from './mapFilters'
 
-export type MapMode = 'all' | 'top-cost' | 'top-traffic' | 'cross-az-only' | 'highest-cost-workloads'
+export type MapMode = 'all' | 'top-cost' | 'top-traffic' | 'highest-cost-workloads'
 
 export const MAP_MODES: { value: MapMode; label: string; hint: string }[] = [
   { value: 'all', label: 'All routes', hint: 'Every route with any tracked cost or traffic — nothing hidden.' },
   { value: 'top-cost', label: 'Top cost routes', hint: 'The highest-cost routes, up to the Max connections limit below.' },
   { value: 'top-traffic', label: 'Top traffic routes', hint: 'The highest-traffic (GB) routes, up to the Max connections limit below.' },
-  { value: 'cross-az-only', label: 'Cross-AZ only', hint: 'Routes that cross an availability-zone boundary (the only kind ZoneTax bills — this is functionally the same as "All routes" today since same-AZ traffic is never included as a routed entry).' },
   { value: 'highest-cost-workloads', label: 'Highest-cost workloads', hint: 'Every route touching the top 5 highest-total-cost workloads (by combined outbound + inbound spend).' },
 ]
 
 /** Applies a mode + Max-connections cap to an entry set, returning the routes to actually draw
  * PLUS how many were left out (so the UI can show "X of Y routes shown, raise Max connections to
  * see more" rather than silently dropping data — the brief's explicit "expose any aggregation
- * threshold" requirement). `maxConnections` caps how many AGGREGATED ROUTES (src/dst zone pairs,
- * not raw entries) are drawn — matching the reference's own "Max connections" semantics, which
- * caps rendered graph edges, not underlying data rows. Pass Infinity for no cap. */
+ * threshold" requirement). `maxConnections` caps how many AGGREGATED ROUTES are drawn — matching
+ * the reference's own "Max connections" semantics, which caps rendered graph edges, not
+ * underlying data rows. Pass Infinity for no cap.
+ *
+ * `routeKeyOf` identifies what one "route" (one graph edge) means for the CURRENTLY ACTIVE view
+ * — (src_zone,dst_zone) in Zone->Zone view, (src workload,dst workload) in Workload->Workload
+ * view. These are genuinely different granularities (3 zones can have at most 6 directed
+ * routes, but a workload view can easily have dozens) — a real bug caught via Playwright against
+ * live data: capping always by zone-pair left the Workload view's 16 real distinct routes
+ * completely uncapped (and reported a stale, wrong "6 routes" hint) whenever the cap was set
+ * below 16, since the code was silently applying the ZONE route count/cap regardless of which
+ * view was actually being drawn. Defaults to the zone-pair key for backward compatibility with
+ * existing zone-view-only callers/tests.
+ *
+ * Note: there is deliberately no "Cross-AZ only" mode — GET /api/v1/map (this data's source)
+ * only ever returns billed cross-AZ entries by construction (same-AZ traffic is never included
+ * as a routed entry there), so such a mode could never differ from "All routes". An earlier
+ * version of this file had one; it was removed as dead/misleading UI rather than kept "for
+ * clarity" once that was noticed — a control that can never change its own output is worse than
+ * no control. */
 export function applyMapMode(
   entries: MapEntry[],
   mode: MapMode,
   maxConnections: number,
+  routeKeyOf: (e: MapEntry) => string = (e) => e.src_zone + '>' + e.dst_zone,
 ): { shown: MapEntry[]; hiddenCount: number; totalRoutes: number } {
   let candidates = entries
   if (mode === 'highest-cost-workloads') {
@@ -42,10 +59,6 @@ export function applyMapMode(
     )
     candidates = entries.filter((e) => top5.has(srcWorkloadKey(e)) || top5.has(dstWorkloadKey(e)))
   }
-  // cross-az-only is a no-op filter: /api/v1/map only ever returns billed cross-AZ entries (the
-  // backend never includes same-AZ rows in this endpoint) — kept as an explicit, real mode
-  // rather than silently doing nothing, so its intent is visible/selectable even though the
-  // underlying data already guarantees it.
 
   const sorted =
     mode === 'top-cost'
@@ -54,16 +67,16 @@ export function applyMapMode(
         ? [...candidates].sort((a, b) => b.gb - a.gb)
         : candidates
 
-  const totalRoutes = countDistinctRoutes(sorted)
+  const totalRoutes = countDistinctRoutes(sorted, routeKeyOf)
   if (!Number.isFinite(maxConnections) || totalRoutes <= maxConnections) {
     return { shown: sorted, hiddenCount: 0, totalRoutes }
   }
-  // Cap by DISTINCT (src_zone,dst_zone) route, keeping every entry belonging to an admitted
+  // Cap by DISTINCT route (per routeKeyOf), keeping every entry belonging to an admitted
   // route — never truncate mid-route, which would silently understate one route's real total.
   const seen = new Set<string>()
   const shown: MapEntry[] = []
   for (const e of sorted) {
-    const key = e.src_zone + '>' + e.dst_zone
+    const key = routeKeyOf(e)
     if (!seen.has(key)) {
       if (seen.size >= maxConnections) continue
       seen.add(key)
@@ -73,8 +86,8 @@ export function applyMapMode(
   return { shown, hiddenCount: totalRoutes - seen.size, totalRoutes }
 }
 
-function countDistinctRoutes(entries: MapEntry[]): number {
+function countDistinctRoutes(entries: MapEntry[], routeKeyOf: (e: MapEntry) => string): number {
   const seen = new Set<string>()
-  for (const e of entries) seen.add(e.src_zone + '>' + e.dst_zone)
+  for (const e of entries) seen.add(routeKeyOf(e))
   return seen.size
 }

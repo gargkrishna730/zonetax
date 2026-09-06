@@ -76,4 +76,27 @@ describe('applyMapMode: Max connections cap', () => {
     expect(hiddenCount).toBe(0)
     expect(totalRoutes).toBe(2)
   })
+
+  it('caps by the CALLER-SUPPLIED route granularity, not always by zone-pair — regression test for a real bug caught against live data where capping stayed keyed to zone-pair even in the Workload view, silently leaving it uncapped', () => {
+    // 3 entries, all sharing the SAME zone-pair (a->b) but each a DIFFERENT workload pair —
+    // e.g. what a real Workload->Workload view looks like when routed through only 2 zones.
+    const entries = [
+      entry({ src_workload: 'w1', dst_workload: 'd1', cost_usd: 5 }),
+      entry({ src_workload: 'w2', dst_workload: 'd2', cost_usd: 3 }),
+      entry({ src_workload: 'w3', dst_workload: 'd3', cost_usd: 1 }),
+    ]
+    const byWorkloadPair = (e: MapEntry) => e.src_workload + '>' + e.dst_workload
+
+    // Capping by the DEFAULT (zone-pair) key sees only 1 distinct route (all share a->b) and
+    // therefore never truncates — this is the bug: it can never cap a workload view correctly.
+    const zoneKeyed = applyMapMode(entries, 'top-cost', 2)
+    expect(zoneKeyed.totalRoutes).toBe(1)
+    expect(zoneKeyed.hiddenCount).toBe(0)
+
+    // Capping by the WORKLOAD-PAIR key correctly sees 3 distinct routes and truncates to 2.
+    const workloadKeyed = applyMapMode(entries, 'top-cost', 2, byWorkloadPair)
+    expect(workloadKeyed.totalRoutes).toBe(3)
+    expect(workloadKeyed.hiddenCount).toBe(1)
+    expect(workloadKeyed.shown).toHaveLength(2)
+  })
 })
