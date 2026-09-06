@@ -69,3 +69,38 @@ export interface HistoryResponse {
   bucket_size_seconds: number
   buckets: HistoryBucket[]
 }
+
+// One route's real observed cost/traffic delta for a requested time window, from
+// GET /api/v1/map — the Cross-AZ Service Map's primary data source.
+export interface MapEntry {
+  src_zone: string
+  dst_zone: string
+  src_namespace: string
+  src_workload: string
+  dst_namespace: string
+  dst_workload: string
+  gb: number
+  cost_usd: number
+}
+
+export type MapRange = '15m' | '1h' | '6h' | '24h' | '7d' | 'custom'
+
+export interface MapResponse {
+  range_requested: MapRange
+  range_start_utc: string
+  range_end_utc: string
+  server_time_utc: string
+  cloud?: string
+  region?: string
+  // has_data=false: no snapshot data exists yet to answer this query at all.
+  has_data: boolean
+  // complete=false: real data exists but the window is only partially observed (starts before
+  // history began, or extends into the current in-progress moment) — never present a partial
+  // number as if it were the full requested window's total.
+  complete: boolean
+  price_per_gb_usd: number
+  price_per_gb_direction_usd: number
+  entries: MapEntry[]
+  total_cross_az_gb: number
+  total_cross_az_cost_usd: number
+}

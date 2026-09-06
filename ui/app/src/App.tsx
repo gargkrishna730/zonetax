@@ -14,25 +14,38 @@ import {
 import '@xyflow/react/dist/style.css'
 import './dashboard.css'
 
-import type { CostsResponse, CostEntry, HistoryRange } from './types'
-import {
-  buildZoneFlow,
-  buildWorkloadFlow,
-  buildWorkloadPairBreakdown,
-  srcWorkloadKey,
-  dstWorkloadKey,
-  type FlowGraph,
-  type WorkloadPairBreakdown,
-} from './flowGraph'
-import { costColor, fmtAgo, fmtGB, fmtUSD } from './format'
+import type { CostsResponse, HistoryRange, MapEntry, MapRange } from './types'
+import { buildZoneFlow, buildWorkloadFlow, buildWorkloadPairBreakdown, srcWorkloadKey, dstWorkloadKey, type FlowGraph, type WorkloadPairBreakdown } from './flowGraph'
+import { fmtGB, fmtUSD } from './format'
 import { nodeMatchesQuery, neighborhoodOf } from './mapSearch'
 import { useHistory } from './useHistory'
+import { useMapData } from './useMapData'
+import {
+  emptyFilters,
+  applyFilters,
+  buildFilterOptions,
+  extractZones,
+  extractNamespaces,
+  extractWorkloads,
+  extractSrcWorkloads,
+  extractDstWorkloads,
+  extractRoutes,
+  type MapFilters,
+} from './mapFilters'
+import { applyMapMode, MAP_MODES, type MapMode } from './mapModes'
+import { computeMapSummary } from './mapSummary'
+import { routeColor } from './routeColors'
 import { FlowBoxNode, type FlowBoxNodeData } from './components/FlowBoxNode'
 import { FlowGraphEdge, type FlowGraphEdgeData } from './components/FlowGraphEdge'
 import { EdgeDrillDownPanel, type DrillDownSelection } from './components/EdgeDrillDownPanel'
 import { MapLegend } from './components/MapLegend'
 import { KpiPanel } from './components/KpiPanel'
 import { CostHistoryChart } from './components/CostHistoryChart'
+import { Toolbar } from './components/Toolbar'
+import { FilterPanel, type FilterGroupDef, type RangeFilterDef, type ActiveChip } from './components/FilterPanel'
+import { SummaryStrip } from './components/SummaryStrip'
+import { RouteDetailsPanel } from './components/RouteDetailsPanel'
+import { TopOffendersTable } from './components/TopOffendersTable'
 
 const POLL_MS = 10_000
 
@@ -51,9 +64,6 @@ type ViewMode = 'zone' | 'workload'
 function RefitOnViewChange({ viewMode, nodeCount }: { viewMode: ViewMode; nodeCount: number }) {
   const { fitView } = useReactFlow()
   useEffect(() => {
-    // Deferred one tick so this runs after ReactFlow has measured the newly-swapped node set —
-    // calling fitView() in the same tick as the nodes prop changing can compute bounds from the
-    // previous (stale) node positions.
     const id = requestAnimationFrame(() => fitView({ padding: 0.15, duration: 200 }))
     return () => cancelAnimationFrame(id)
   }, [viewMode, nodeCount, fitView])
@@ -61,28 +71,14 @@ function RefitOnViewChange({ viewMode, nodeCount }: { viewMode: ViewMode; nodeCo
 }
 
 /** Nodes are laid out on a static, deterministic circle (or side-by-side row for <=2 nodes) —
- * no force simulation. This is a closed-form function of (index, count), so it can never
- * converge badly, jump between renders, or produce NaN positions; it's also directly testable
- * with pure geometry, unlike a physics sim. The user can still drag nodes anywhere afterward —
- * ReactFlow persists that position in its own node state — this is just the initial layout.
- *
- * The circle's radius and the virtual canvas it's drawn on both grow with node count (rather
- * than staying fixed at whatever fit 3 zones) — the workload view can easily have a dozen-plus
- * nodes, and a fixed-radius circle at that count visibly overlapped boxes in testing.
- * ReactFlow's fitView then zooms/pans the actual viewport to fit whatever this returns, so a
- * bigger virtual canvas here doesn't shrink anything on screen — it just gives crowded layouts
- * room to spread out before fitView frames them. */
+ * no force simulation. See flowGraph.ts's doc for the original rationale; unchanged here. */
 function initialNodePosition(index: number, total: number): { x: number; y: number } {
-  const boxWidth = 190 // approx rendered width of a flow-box-node, incl. padding — used to
-  // pick a radius that keeps adjacent boxes from visually overlapping as count grows.
+  const boxWidth = 190
   if (total <= 2) {
     const width = 900
     const x = total === 1 ? width / 2 : index === 0 ? width * 0.25 : width * 0.75
     return { x, y: 260 }
   }
-  // Circumference needed for `total` boxes side-by-side, plus headroom, converted back to a
-  // radius; floored at a sane minimum so small counts (3-4) don't get an unnecessarily tiny
-  // circle.
   const r = Math.max(230, (total * boxWidth * 1.15) / (2 * Math.PI))
   const cx = r + 160
   const cy = r + 120
@@ -97,38 +93,31 @@ async function fetchCosts(): Promise<CostsResponse> {
 }
 
 export default function App() {
+  // Legacy /api/v1/costs poll — still backs the collector-session KpiPanel/CostHistoryChart
+  // section retained below the Service Map (cumulative "this session" metrics remain useful
+  // alongside the new time-windowed map, and neither replaces the other).
   const [costs, setCosts] = useState<CostsResponse | null>(null)
   const [fetchError, setFetchError] = useState<string | null>(null)
-  const [filterKey, setFilterKey] = useState<string>('')
-  const [viewMode, setViewMode] = useState<ViewMode>('zone')
-  const [offendersCollapsed, setOffendersCollapsed] = useState(false)
-  // Set by clicking a row in the edge drill-down panel — narrows the view to exactly this one
-  // (source workload, destination workload) pair rather than "all traffic from this source
-  // workload" (the coarser `filterKey` above). This is what makes "click zone A->B, click one
-  // workload pair, see just that pair in Workload -> Workload" actually land on a single edge
-  // instead of that workload's traffic to every zone it happens to talk to.
-  const [pairFilter, setPairFilter] = useState<{ srcKey: string; dstKey: string; srcLabel: string; dstLabel: string } | null>(null)
-  // The currently-open drill-down panel, or null when closed. Selecting an edge in the zone
-  // view populates this with every real workload pair behind that route (see
-  // buildWorkloadPairBreakdown) rather than the hover tooltip's capped top-5.
-  const [drillDown, setDrillDown] = useState<DrillDownSelection | null>(null)
-  // Fullscreen map mode: a substantially larger canvas is the #1 fix for "the map is too small
-  // to inspect" — rather than inventing a second diagram, the SAME ReactFlow instance is
-  // reparented into an overlay so filters/selection/positions all carry over untouched.
-  const [mapFullscreen, setMapFullscreen] = useState(false)
-  // Free-text search across node id/label/sublabel (workload, namespace, or zone name) — matched
-  // nodes/edges stay full-opacity, everything else dims, rather than actually removing nodes
-  // from the graph (removing them would also silently hide their un-searched-for edges/context).
-  const [mapSearch, setMapSearch] = useState('')
-  // Clicking a node "focuses" it: only that node's own inbound/outbound routes stay bright,
-  // everything else dims — the requested "click a workload, see its zone A/B breakdown"
-  // interaction, generalized to any node in either view. Click the same node again to unfocus.
-  const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null)
   const [historyRange, setHistoryRange] = useState<HistoryRange>('24h')
   const history = useHistory(historyRange)
-  // Node positions persist across data refreshes AND across switching view mode back and forth
-  // (keyed by "viewMode:nodeId" so a zone id and a workload id can never collide) so a user's
-  // drag isn't undone by the next 10s poll or by toggling views.
+
+  // --- Cross-AZ Service Map state ---------------------------------------------------------
+  const [mapRange, setMapRange] = useState<MapRange>('24h')
+  const [customSince, setCustomSince] = useState<string | null>(null)
+  const [customUntil, setCustomUntil] = useState<string | null>(null)
+  const [autoRefresh, setAutoRefresh] = useState(true)
+  const mapData = useMapData(mapRange, customSince, customUntil, autoRefresh ? 15_000 : 0x7fffffff)
+  const [filters, setFilters] = useState<MapFilters>(emptyFilters())
+  const [mapMode, setMapMode] = useState<MapMode>('all')
+  const [maxConnections, setMaxConnections] = useState<number>(50)
+  const [viewMode, setViewMode] = useState<ViewMode>('zone')
+  const [selectedRoute, setSelectedRoute] = useState<MapEntry | null>(null)
+  const [offendersCollapsed, setOffendersCollapsed] = useState(false)
+  const [pairFilter, setPairFilter] = useState<{ srcKey: string; dstKey: string; srcLabel: string; dstLabel: string } | null>(null)
+  const [drillDown, setDrillDown] = useState<DrillDownSelection | null>(null)
+  const [mapFullscreen, setMapFullscreen] = useState(false)
+  const [mapSearch, setMapSearch] = useState('')
+  const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null)
   const nodePositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map())
 
   useEffect(() => {
@@ -152,8 +141,6 @@ export default function App() {
     }
   }, [])
 
-  // Escape key exits fullscreen map mode — a required control per the fullscreen spec, not
-  // just the visible close button, since a keyboard-first / power user expects it to just work.
   useEffect(() => {
     if (!mapFullscreen) return
     function onKey(e: KeyboardEvent) {
@@ -163,40 +150,101 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [mapFullscreen])
 
-  const entries: CostEntry[] = costs?.entries ?? []
-  const positiveEntries = useMemo(() => entries.filter((e) => e.cost_usd > 0), [entries])
+  const allEntries: MapEntry[] = useMemo(() => mapData.data?.entries ?? [], [mapData.data])
 
-  const workloadOptions = useMemo(() => {
-    const totals = new Map<string, { label: string; cost: number }>()
-    for (const e of positiveEntries) {
-      const key = srcWorkloadKey(e)
-      const cur = totals.get(key) || { label: e.src_workload || '(unknown)', cost: 0 }
-      cur.cost += e.cost_usd
-      totals.set(key, cur)
-    }
-    return Array.from(totals.entries()).sort((a, b) => b[1].cost - a[1].cost)
-  }, [positiveEntries])
-
-  const scopedEntries = useMemo(
+  // Filters are applied BEFORE the map mode/cap — filtering must never be silently overridden
+  // by "top N" truncation, and mode/cap operate on whatever the user has already scoped to.
+  const filteredEntries = useMemo(() => applyFilters(allEntries, filters), [allEntries, filters])
+  const pairScopedEntries = useMemo(
     () =>
-      positiveEntries.filter((e) => {
-        if (pairFilter) return srcWorkloadKey(e) === pairFilter.srcKey && dstWorkloadKey(e) === pairFilter.dstKey
-        return !filterKey || srcWorkloadKey(e) === filterKey
-      }),
-    [positiveEntries, filterKey, pairFilter],
+      pairFilter
+        ? filteredEntries.filter((e) => srcWorkloadKey(e) === pairFilter.srcKey && dstWorkloadKey(e) === pairFilter.dstKey)
+        : filteredEntries,
+    [filteredEntries, pairFilter],
+  )
+  const { shown: modeShownEntries, hiddenCount, totalRoutes } = useMemo(
+    () => applyMapMode(pairScopedEntries, mapMode, maxConnections),
+    [pairScopedEntries, mapMode, maxConnections],
   )
 
+  const summary = useMemo(() => computeMapSummary(filteredEntries), [filteredEntries])
+  const crossAZTrafficPercent =
+    costs?.totals && costs.totals.cross_az_gb + costs.totals.same_az_gb > 0
+      ? (100 * costs.totals.cross_az_gb) / (costs.totals.cross_az_gb + costs.totals.same_az_gb)
+      : null
+
+  // --- Filter panel option groups (counts reflect the CURRENT filtered set, honestly live) ---
+  const zoneOptions = useMemo(() => buildFilterOptions(allEntries, extractZones, (v) => v), [allEntries])
+  const namespaceOptions = useMemo(() => buildFilterOptions(allEntries, extractNamespaces, (v) => v), [allEntries])
+  const workloadLabelOf = useCallback(
+    (key: string) => {
+      const found = allEntries.find((e) => srcWorkloadKey(e) === key || dstWorkloadKey(e) === key)
+      if (!found) return key
+      return srcWorkloadKey(found) === key ? found.src_workload : found.dst_workload
+    },
+    [allEntries],
+  )
+  const workloadOptions = useMemo(() => buildFilterOptions(allEntries, extractWorkloads, workloadLabelOf), [allEntries, workloadLabelOf])
+  const srcWorkloadOptions = useMemo(() => buildFilterOptions(allEntries, extractSrcWorkloads, workloadLabelOf), [allEntries, workloadLabelOf])
+  const dstWorkloadOptions = useMemo(() => buildFilterOptions(allEntries, extractDstWorkloads, workloadLabelOf), [allEntries, workloadLabelOf])
+  const routeOptions = useMemo(() => buildFilterOptions(allEntries, extractRoutes, (v) => v.replace('>', ' → ')), [allEntries])
+
+  function toggleInSet(setKey: keyof MapFilters, value: string) {
+    setFilters((f) => {
+      const next = { ...f, [setKey]: new Set(f[setKey] as Set<string>) } as MapFilters
+      const s = next[setKey] as Set<string>
+      if (s.has(value)) s.delete(value)
+      else s.add(value)
+      return next
+    })
+  }
+  function selectAllIn(setKey: keyof MapFilters, values: string[]) {
+    setFilters((f) => ({ ...f, [setKey]: new Set(values) }))
+  }
+  function clearSet(setKey: keyof MapFilters) {
+    setFilters((f) => ({ ...f, [setKey]: new Set() }))
+  }
+
+  const filterGroups: FilterGroupDef[] = [
+    { key: 'zones', title: 'Availability zone', options: zoneOptions, selected: filters.zones, onToggle: (v) => toggleInSet('zones', v), onSelectAll: () => selectAllIn('zones', zoneOptions.map((o) => o.value)), onClearGroup: () => clearSet('zones'), searchable: true },
+    { key: 'namespaces', title: 'Namespace', options: namespaceOptions, selected: filters.namespaces, onToggle: (v) => toggleInSet('namespaces', v), onSelectAll: () => selectAllIn('namespaces', namespaceOptions.map((o) => o.value)), onClearGroup: () => clearSet('namespaces'), searchable: true },
+    { key: 'workloads', title: 'Workload / service', options: workloadOptions, selected: filters.workloads, onToggle: (v) => toggleInSet('workloads', v), onSelectAll: () => selectAllIn('workloads', workloadOptions.map((o) => o.value)), onClearGroup: () => clearSet('workloads'), searchable: true },
+    { key: 'srcWorkloads', title: 'Source workload', options: srcWorkloadOptions, selected: filters.srcWorkloads, onToggle: (v) => toggleInSet('srcWorkloads', v), onSelectAll: () => selectAllIn('srcWorkloads', srcWorkloadOptions.map((o) => o.value)), onClearGroup: () => clearSet('srcWorkloads'), searchable: true },
+    { key: 'dstWorkloads', title: 'Destination workload', options: dstWorkloadOptions, selected: filters.dstWorkloads, onToggle: (v) => toggleInSet('dstWorkloads', v), onSelectAll: () => selectAllIn('dstWorkloads', dstWorkloadOptions.map((o) => o.value)), onClearGroup: () => clearSet('dstWorkloads'), searchable: true },
+    { key: 'routes', title: 'Cross-AZ route', options: routeOptions, selected: filters.routes, onToggle: (v) => toggleInSet('routes', v), onSelectAll: () => selectAllIn('routes', routeOptions.map((o) => o.value)), onClearGroup: () => clearSet('routes'), searchable: true },
+  ]
+  const rangeFilters: RangeFilterDef[] = [
+    { key: 'cost', title: 'Cost range', min: filters.costMin, max: filters.costMax, onMinChange: (v) => setFilters((f) => ({ ...f, costMin: v })), onMaxChange: (v) => setFilters((f) => ({ ...f, costMax: v })), unit: 'USD' },
+    { key: 'traffic', title: 'Traffic range', min: filters.trafficMinGB, max: filters.trafficMaxGB, onMinChange: (v) => setFilters((f) => ({ ...f, trafficMinGB: v })), onMaxChange: (v) => setFilters((f) => ({ ...f, trafficMaxGB: v })), unit: 'GB' },
+  ]
+  const activeChips: ActiveChip[] = useMemo(() => {
+    const chips: ActiveChip[] = []
+    const addAll = (values: Set<string>, key: string, labelOf: (v: string) => string, clear: (v: string) => void) => {
+      for (const v of values) chips.push({ key: key + ':' + v, label: `${key}: ${labelOf(v)}`, onRemove: () => clear(v) })
+    }
+    addAll(filters.zones, 'AZ', (v) => v, (v) => toggleInSet('zones', v))
+    addAll(filters.namespaces, 'ns', (v) => v, (v) => toggleInSet('namespaces', v))
+    addAll(filters.workloads, 'workload', workloadLabelOf, (v) => toggleInSet('workloads', v))
+    addAll(filters.srcWorkloads, 'src', workloadLabelOf, (v) => toggleInSet('srcWorkloads', v))
+    addAll(filters.dstWorkloads, 'dst', workloadLabelOf, (v) => toggleInSet('dstWorkloads', v))
+    addAll(filters.routes, 'route', (v) => v.replace('>', '→'), (v) => toggleInSet('routes', v))
+    if (filters.costMin !== null) chips.push({ key: 'costMin', label: `cost ≥ $${filters.costMin}`, onRemove: () => setFilters((f) => ({ ...f, costMin: null })) })
+    if (filters.costMax !== null) chips.push({ key: 'costMax', label: `cost ≤ $${filters.costMax}`, onRemove: () => setFilters((f) => ({ ...f, costMax: null })) })
+    if (filters.trafficMinGB !== null) chips.push({ key: 'trafficMin', label: `traffic ≥ ${filters.trafficMinGB}GB`, onRemove: () => setFilters((f) => ({ ...f, trafficMinGB: null })) })
+    if (filters.trafficMaxGB !== null) chips.push({ key: 'trafficMax', label: `traffic ≤ ${filters.trafficMaxGB}GB`, onRemove: () => setFilters((f) => ({ ...f, trafficMaxGB: null })) })
+    return chips
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters, workloadLabelOf])
+
+  // --- Map graph (reuses flowGraph.ts's existing aggregation — MapEntry is structurally
+  // identical to CostEntry, so buildZoneFlow/buildWorkloadFlow apply unchanged, satisfying the
+  // "reuse existing calculations, don't recompute in the UI" constraint). ---------------------
   const flowGraph: FlowGraph = useMemo(
-    () => (viewMode === 'zone' ? buildZoneFlow(scopedEntries) : buildWorkloadFlow(scopedEntries)),
-    [scopedEntries, viewMode],
+    () => (viewMode === 'zone' ? buildZoneFlow(modeShownEntries) : buildWorkloadFlow(modeShownEntries)),
+    [modeShownEntries, viewMode],
   )
 
-  // Node positions must be real React state (not a plain memo) and flow through ReactFlow's
-  // onNodesChange, or ReactFlow treats `nodes` as fully controlled and silently ignores drag
-  // gestures entirely — this was a real bug caught by browser-driven verification (Playwright
-  // drag simulation moved the pointer correctly but the node never moved) before shipping.
   const [nodes, setNodes] = useState<Node<FlowBoxNodeData, 'flowBox'>[]>([])
-
   useEffect(() => {
     setNodes((prev) => {
       const prevById = new Map(prev.map((n) => [n.id, n]))
@@ -206,12 +254,7 @@ export default function App() {
         const existingPos = nodePositionsRef.current.get(posKey)
         const position = existingNode?.position ?? existingPos ?? initialNodePosition(i, flowGraph.nodes.length)
         nodePositionsRef.current.set(posKey, position)
-        return {
-          id: n.id,
-          type: 'flowBox' as const,
-          position,
-          data: { label: n.label, sublabel: n.sublabel },
-        }
+        return { id: n.id, type: 'flowBox' as const, position, data: { label: n.label, sublabel: n.sublabel } }
       })
     })
   }, [flowGraph, viewMode])
@@ -220,25 +263,15 @@ export default function App() {
     setNodes((nds) => applyNodeChanges(changes, nds))
   }, [])
 
-  // Reset search/focus when the underlying entity set changes shape (view mode or workload
-  // filter) so a stale focused-node-id from the zone view doesn't silently persist (and match
-  // nothing) after switching to the workload view.
   useEffect(() => {
     setFocusedNodeId(null)
-  }, [viewMode, filterKey, pairFilter])
+  }, [viewMode, pairFilter, mapMode])
 
   const nodesById = useMemo(() => new Map(flowGraph.nodes.map((n) => [n.id, n])), [flowGraph.nodes])
-
-  // The neighborhood (self + directly connected nodes) of the focused node, or null when no
-  // node is focused — null is treated as "everything is in scope" everywhere this is used.
   const focusedNeighborhood = useMemo(
     () => (focusedNodeId ? neighborhoodOf(focusedNodeId, flowGraph.pairs) : null),
     [focusedNodeId, flowGraph.pairs],
   )
-
-  // A node/edge is dimmed if a search query is active and it doesn't match, OR a node is
-  // focused and this node/edge isn't in its neighborhood. Both conditions can combine (e.g.
-  // search AND focus active at once) — dim if EITHER excludes it.
   const isNodeDimmed = useCallback(
     (id: string) => {
       const node = nodesById.get(id)
@@ -249,20 +282,19 @@ export default function App() {
     [nodesById, mapSearch, focusedNeighborhood],
   )
 
+  const maxPairCostForRamp = flowGraph.maxPairCost || 1
   const edges = useMemo(() => {
     const breakdownHeading = viewMode === 'zone' ? 'Top workloads' : 'Top zone routes'
     return flowGraph.pairs.map((pair) => {
-      const color = costColor(pair.cost, flowGraph.maxPairCost)
-      const widthPx = Math.max(1.5, Math.min(7, 1.5 + 5.5 * Math.sqrt(pair.cost / (flowGraph.maxPairCost || 1))))
+      const isSelected = selectedRoute && viewMode === 'zone' && pair.srcId === selectedRoute.src_zone && pair.dstId === selectedRoute.dst_zone
+      const color = isSelected ? routeColor('selected') : mapData.error ? routeColor('unavailable') : !mapData.data?.complete ? routeColor('stale', pair.cost / maxPairCostForRamp) : routeColor('normal', pair.cost / maxPairCostForRamp)
+      const widthPx = Math.max(1.5, Math.min(7, 1.5 + 5.5 * Math.sqrt(pair.cost / maxPairCostForRamp)))
       const marker: EdgeMarker = { type: MarkerType.ArrowClosed, color, width: 22, height: 22 }
       const srcNode = flowGraph.nodes.find((n) => n.id === pair.srcId)
       const dstNode = flowGraph.nodes.find((n) => n.id === pair.dstId)
-      // Drilling down only makes sense in the zone view — a workload-view edge is already the
-      // single most granular thing (one workload pair), there's nothing further to break it
-      // into.
       const onSelect =
         viewMode === 'zone'
-          ? () =>
+          ? () => {
               setDrillDown({
                 srcLabel: srcNode?.label ?? pair.srcId,
                 dstLabel: dstNode?.label ?? pair.dstId,
@@ -270,6 +302,9 @@ export default function App() {
                 totalGb: pair.gb,
                 pairs: buildWorkloadPairBreakdown(pair.entries),
               })
+              const first = pair.entries[0]
+              if (first) setSelectedRoute(first)
+            }
           : undefined
       const dimmed = isNodeDimmed(pair.srcId) || isNodeDimmed(pair.dstId)
       return {
@@ -281,11 +316,8 @@ export default function App() {
         data: { pair, color, widthPx, breakdownHeading, onSelect, dimmed } satisfies FlowGraphEdgeData,
       }
     })
-  }, [flowGraph, viewMode, isNodeDimmed])
+  }, [flowGraph, viewMode, isNodeDimmed, selectedRoute, mapData.error, mapData.data?.complete, maxPairCostForRamp])
 
-  // Injects search/focus emphasis + click-to-focus into the positioned node state, without
-  // making emphasis part of that state itself — so a search keystroke doesn't reset drag
-  // positions (setNodes above intentionally excludes mapSearch/focusedNodeId from its deps).
   const displayNodes = useMemo(
     () =>
       nodes.map((n) => ({
@@ -299,248 +331,175 @@ export default function App() {
     [nodes, focusedNodeId, isNodeDimmed],
   )
 
-  const totalCost = flowGraph.pairs.reduce((s, p) => s + p.cost, 0)
-  const totalGB = flowGraph.pairs.reduce((s, p) => s + p.gb, 0)
+  const topOffenders = useMemo(() => [...pairScopedEntries].sort((a, b) => b.cost_usd - a.cost_usd).slice(0, 15), [pairScopedEntries])
 
-  const topOffenders = useMemo(
-    () => [...scopedEntries].sort((a, b) => b.cost_usd - a.cost_usd).slice(0, 15),
-    [scopedEntries],
-  )
-  const maxOffenderCost = topOffenders[0]?.cost_usd ?? 0
+  const dataStatus: 'loading' | 'error' | 'no-data' | 'no-match' | 'ok' = mapData.error
+    ? 'error'
+    : mapData.loading && !mapData.data
+      ? 'loading'
+      : !mapData.data?.has_data
+        ? 'no-data'
+        : filteredEntries.length === 0 && allEntries.length > 0
+          ? 'no-match'
+          : 'ok'
 
   return (
-    <div className="app">
-      <header>
-        <h1>
-          Zone<span className="tax">Tax</span>
-        </h1>
-        <div className="meta">
-          <span>
-            {costs?.cloud || '—'} · {costs?.region || '—'}
-          </span>
-          {costs?.stale_error ? (
-            <span className="stale">
-              <span className="dot dot-bad" />
-              stale — {costs.stale_error}
-            </span>
-          ) : fetchError ? (
-            <span className="stale">
-              <span className="dot dot-bad" />
-              fetch failed: {fetchError}
-            </span>
-          ) : (
-            <span>
-              <span className="dot" />
-              updated {fmtAgo(costs?.updated_at)}
-            </span>
-          )}
-        </div>
-      </header>
+    <div className="app app-servicemap">
+      <Toolbar
+        cloud={mapData.data?.cloud || costs?.cloud}
+        region={mapData.data?.region || costs?.region}
+        range={mapRange}
+        onRangeChange={setMapRange}
+        customSince={customSince}
+        customUntil={customUntil}
+        onCustomRangeChange={(s, u) => {
+          setCustomSince(s)
+          setCustomUntil(u)
+        }}
+        data={mapData.data}
+        loading={mapData.loading}
+        error={mapData.error}
+        autoRefresh={autoRefresh}
+        onAutoRefreshChange={setAutoRefresh}
+        onRefreshNow={mapData.refetch}
+      />
 
-      <main className={offendersCollapsed ? 'offenders-collapsed' : ''}>
-        <KpiPanel costs={costs} fetchError={fetchError} />
-
-        <CostHistoryChart
-          range={historyRange}
-          onRangeChange={setHistoryRange}
-          history={history.data}
-          loading={history.loading}
-          error={history.error}
+      <div className="servicemap-body">
+        <FilterPanel
+          groups={filterGroups}
+          ranges={rangeFilters}
+          activeChips={activeChips}
+          onResetAll={() => setFilters(emptyFilters())}
+          maxConnections={maxConnections}
+          onMaxConnectionsChange={setMaxConnections}
+          hiddenRouteCount={hiddenCount}
+          totalRouteCount={totalRoutes}
         />
 
+        <main className="servicemap-main">
+          <SummaryStrip
+            summary={summary}
+            range={mapRange}
+            crossAZTrafficPercent={crossAZTrafficPercent}
+            pricePerGBUSD={mapData.data?.price_per_gb_usd ?? costs?.totals.price_per_gb_usd ?? 0}
+            pricePerGBDirectionUSD={mapData.data?.price_per_gb_direction_usd ?? costs?.totals.price_per_gb_direction_usd ?? 0}
+            windowLabel={mapData.data && !mapData.data.complete ? 'Note: the current window is only partially observed — see the toolbar status.' : ''}
+          />
 
-        <div className={`card flow-card${mapFullscreen ? ' flow-fullscreen-anchor' : ''}`}>
-          <div className="card-head">
-            <h2>Traffic map</h2>
-            <div className="head-controls">
-              <div className="view-toggle" role="tablist" aria-label="Flow map view">
-                <button
-                  type="button"
-                  className={viewMode === 'zone' ? 'active' : ''}
-                  onClick={() => {
-                    setViewMode('zone')
-                    setPairFilter(null)
-                  }}
-                  role="tab"
-                  aria-selected={viewMode === 'zone'}
-                >
-                  Zone → Zone
-                </button>
-                <button
-                  type="button"
-                  className={viewMode === 'workload' ? 'active' : ''}
-                  onClick={() => {
-                    setViewMode('workload')
-                    setPairFilter(null)
-                  }}
-                  role="tab"
-                  aria-selected={viewMode === 'workload'}
-                >
-                  Workload → Workload
-                </button>
-              </div>
-              <input
-                type="text"
-                className="map-search"
-                placeholder="Search workload, namespace, or zone…"
-                value={mapSearch}
-                onChange={(e) => setMapSearch(e.target.value)}
-                aria-label="Search the traffic map"
-              />
-              {pairFilter ? (
-                <div className="pair-filter-chip">
-                  <span>
-                    {pairFilter.srcLabel} → {pairFilter.dstLabel}
-                  </span>
-                  <button type="button" onClick={() => setPairFilter(null)} aria-label="Clear pair filter">
-                    ×
+          <div className={`card flow-card${mapFullscreen ? ' flow-fullscreen-anchor' : ''}`}>
+            <div className="card-head">
+              <h2>Traffic map</h2>
+              <div className="head-controls">
+                <div className="view-toggle" role="tablist" aria-label="Flow map view">
+                  <button type="button" className={viewMode === 'zone' ? 'active' : ''} onClick={() => { setViewMode('zone'); setPairFilter(null) }} role="tab" aria-selected={viewMode === 'zone'}>
+                    Zone → Zone
+                  </button>
+                  <button type="button" className={viewMode === 'workload' ? 'active' : ''} onClick={() => { setViewMode('workload'); setPairFilter(null) }} role="tab" aria-selected={viewMode === 'workload'}>
+                    Workload → Workload
                   </button>
                 </div>
-              ) : (
-                <select
-                  className="workload-select"
-                  value={filterKey}
-                  onChange={(e) => {
-                    setFilterKey(e.target.value)
-                    setPairFilter(null)
-                  }}
-                  title={filterKey ? workloadOptions.find(([k]) => k === filterKey)?.[1].label : 'All workloads'}
-                >
-                  <option value="">All workloads ({workloadOptions.length})</option>
-                  {workloadOptions.map(([key, v]) => (
-                    <option key={key} value={key}>
-                      {v.label} — {fmtUSD(v.cost)}
-                    </option>
+                <select className="mode-select" value={mapMode} onChange={(e) => setMapMode(e.target.value as MapMode)} title={MAP_MODES.find((m) => m.value === mapMode)?.hint}>
+                  {MAP_MODES.map((m) => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
                   ))}
                 </select>
-              )}
-              <button
-                type="button"
-                className="fullscreen-btn"
-                onClick={() => setMapFullscreen((v) => !v)}
-                title={mapFullscreen ? 'Exit fullscreen (Esc)' : 'Expand to fullscreen'}
-                aria-pressed={mapFullscreen}
-              >
-                {mapFullscreen ? '⤡ Exit fullscreen' : '⤢ Fullscreen'}
-              </button>
-            </div>
-          </div>
-          <div className="flow-summary">
-            {flowGraph.nodes.length} {viewMode === 'zone' ? 'zone' : 'workload'}
-            {flowGraph.nodes.length === 1 ? '' : 's'} · {flowGraph.pairs.length} route
-            {flowGraph.pairs.length === 1 ? '' : 's'} · {fmtUSD(totalCost)} · {fmtGB(totalGB)}
-            {' · '}every route with any tracked cost is shown, none are hidden below a threshold
-          </div>
-          <MapLegend viewMode={viewMode} />
-          {mapFullscreen && <div className="fullscreen-backdrop" onClick={() => setMapFullscreen(false)} />}
-          <div className={`flow-canvas${mapFullscreen ? ' flow-canvas-fullscreen' : ''}`}>
-            {focusedNodeId && (
-              <div className="focus-chip">
-                <span>Focused: {nodesById.get(focusedNodeId)?.label ?? focusedNodeId}</span>
-                <button type="button" onClick={() => setFocusedNodeId(null)} aria-label="Clear focus">
-                  ×
+                <input type="text" className="map-search" placeholder="Search workload, namespace, or zone…" value={mapSearch} onChange={(e) => setMapSearch(e.target.value)} aria-label="Search the traffic map" />
+                {pairFilter && (
+                  <div className="pair-filter-chip">
+                    <span>{pairFilter.srcLabel} → {pairFilter.dstLabel}</span>
+                    <button type="button" onClick={() => setPairFilter(null)} aria-label="Clear pair filter">×</button>
+                  </div>
+                )}
+                <button type="button" className="fullscreen-btn" onClick={() => setMapFullscreen((v) => !v)} title={mapFullscreen ? 'Exit fullscreen (Esc)' : 'Expand to fullscreen'} aria-pressed={mapFullscreen}>
+                  {mapFullscreen ? '⤡ Exit fullscreen' : '⤢ Fullscreen'}
                 </button>
               </div>
-            )}
-            {flowGraph.pairs.length === 0 ? (
-              <div className="empty">
-                {filterKey
-                  ? 'This workload has no cross-AZ traffic in the current window.'
-                  : 'No cross-AZ traffic observed yet.'}
-              </div>
-            ) : (
-              <ReactFlowProvider>
-                <ReactFlow
-                  nodes={displayNodes}
-                  edges={edges}
-                  nodeTypes={nodeTypes}
-                  edgeTypes={edgeTypes}
-                  onNodesChange={onNodesChange}
-                  onNodeDragStop={(_, node) => {
-                    nodePositionsRef.current.set(viewMode + ':' + node.id, node.position)
+            </div>
+            <div className="flow-summary">
+              {flowGraph.nodes.length} {viewMode === 'zone' ? 'zone' : 'workload'}{flowGraph.nodes.length === 1 ? '' : 's'} · {flowGraph.pairs.length} route{flowGraph.pairs.length === 1 ? '' : 's'} · {fmtUSD(summary.totalCostUSD)} · {fmtGB(summary.totalGB)}
+              {hiddenCount > 0 && <> · {hiddenCount} route{hiddenCount === 1 ? '' : 's'} beyond the Max connections limit (see filter panel)</>}
+            </div>
+            <MapLegend viewMode={viewMode} />
+            {mapFullscreen && <div className="fullscreen-backdrop" onClick={() => setMapFullscreen(false)} />}
+            <div className={`flow-canvas${mapFullscreen ? ' flow-canvas-fullscreen' : ''}`}>
+              {focusedNodeId && (
+                <div className="focus-chip">
+                  <span>Focused: {nodesById.get(focusedNodeId)?.label ?? focusedNodeId}</span>
+                  <button type="button" onClick={() => setFocusedNodeId(null)} aria-label="Clear focus">×</button>
+                </div>
+              )}
+              {dataStatus === 'loading' ? (
+                <div className="empty">Loading Cross-AZ Service Map…</div>
+              ) : dataStatus === 'error' ? (
+                <div className="empty empty-error">API error: {mapData.error}</div>
+              ) : dataStatus === 'no-data' ? (
+                <div className="empty">No cross-AZ traffic observed in this time window.</div>
+              ) : dataStatus === 'no-match' ? (
+                <div className="empty">No routes match the current filters — try Reset in the filter panel.</div>
+              ) : flowGraph.pairs.length === 0 ? (
+                <div className="empty">No cross-AZ traffic in the current window.</div>
+              ) : (
+                <ReactFlowProvider>
+                  <ReactFlow
+                    nodes={displayNodes}
+                    edges={edges}
+                    nodeTypes={nodeTypes}
+                    edgeTypes={edgeTypes}
+                    onNodesChange={onNodesChange}
+                    onNodeDragStop={(_, node) => { nodePositionsRef.current.set(viewMode + ':' + node.id, node.position) }}
+                    onPaneClick={() => setFocusedNodeId(null)}
+                    fitView
+                    minZoom={0.15}
+                    maxZoom={3}
+                    proOptions={{ hideAttribution: true }}
+                  >
+                    <Background gap={24} color="rgba(255,255,255,0.04)" />
+                    <Controls showInteractive={false} />
+                    <RefitOnViewChange viewMode={viewMode} nodeCount={nodes.length} />
+                  </ReactFlow>
+                </ReactFlowProvider>
+              )}
+              {drillDown && (
+                <EdgeDrillDownPanel
+                  selection={drillDown}
+                  onClose={() => setDrillDown(null)}
+                  onSelectPair={(p: WorkloadPairBreakdown) => {
+                    setPairFilter({ srcKey: p.srcKey, dstKey: p.dstKey, srcLabel: p.srcLabel, dstLabel: p.dstLabel })
+                    setViewMode('workload')
+                    setDrillDown(null)
                   }}
-                  onPaneClick={() => setFocusedNodeId(null)}
-                  fitView
-                  minZoom={0.15}
-                  maxZoom={3}
-                  proOptions={{ hideAttribution: true }}
-                >
-                  <Background gap={24} color="rgba(255,255,255,0.04)" />
-                  <Controls showInteractive={false} />
-                  <RefitOnViewChange viewMode={viewMode} nodeCount={nodes.length} />
-                </ReactFlow>
-              </ReactFlowProvider>
-            )}
-            {drillDown && (
-              <EdgeDrillDownPanel
-                selection={drillDown}
-                onClose={() => setDrillDown(null)}
-                onSelectPair={(p: WorkloadPairBreakdown) => {
-                  // Pivots into the existing Workload -> Workload view, scoped to exactly this
-                  // one pair via pairFilter (not the coarser single-workload filterKey) — this
-                  // is the "click a workload pair, see just that pair" flow, reusing the view
-                  // that's already built rather than inventing a third diagram just for this.
-                  setPairFilter({ srcKey: p.srcKey, dstKey: p.dstKey, srcLabel: p.srcLabel, dstLabel: p.dstLabel })
-                  setFilterKey('')
-                  setViewMode('workload')
-                  setDrillDown(null)
-                }}
-              />
-            )}
+                />
+              )}
+              {selectedRoute && mapData.data && (
+                <RouteDetailsPanel
+                  entry={selectedRoute}
+                  totalCrossAZCostUSD={summary.totalCostUSD}
+                  pricePerGBUSD={mapData.data.price_per_gb_usd}
+                  rangeStartUTC={mapData.data.range_start_utc}
+                  rangeEndUTC={mapData.data.range_end_utc}
+                  serverTimeUTC={mapData.data.server_time_utc}
+                  onClose={() => setSelectedRoute(null)}
+                />
+              )}
+            </div>
           </div>
-        </div>
 
-        <div className={`card offenders-card${offendersCollapsed ? ' collapsed' : ''}`}>
-          <div className="card-head">
-            <h2>Top offenders</h2>
-            <button
-              type="button"
-              className="collapse-btn"
-              onClick={() => setOffendersCollapsed((c) => !c)}
-              aria-expanded={!offendersCollapsed}
-              title={offendersCollapsed ? 'Show top offenders' : 'Hide top offenders'}
-            >
-              {offendersCollapsed ? 'Show' : 'Hide'}
-            </button>
-          </div>
-          {!offendersCollapsed && (
-            <>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Workload</th>
-                    <th>Route</th>
-                    <th style={{ textAlign: 'right' }}>GB</th>
-                    <th style={{ textAlign: 'right' }}>Cost</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {topOffenders.map((e, i) => {
-                    const color = costColor(e.cost_usd, maxOffenderCost)
-                    return (
-                      <tr key={i}>
-                        <td className="workload">
-                          {e.src_workload || '(unknown)'}
-                          <div className="ns">{e.src_namespace}</div>
-                        </td>
-                        <td className="zones">
-                          {e.src_zone} → {e.dst_zone}
-                        </td>
-                        <td className="gb">{fmtGB(e.gb)}</td>
-                        <td className="cost" style={{ color }}>
-                          <span className="cost-dot" style={{ background: color }} />
-                          {fmtUSD(e.cost_usd)}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-              {topOffenders.length === 0 && <div className="empty">No data yet.</div>}
-            </>
-          )}
-        </div>
-      </main>
+          <TopOffendersTable
+            entries={topOffenders}
+            totalCrossAZCostUSD={summary.totalCostUSD}
+            range={mapRange}
+            onSelectRoute={(e) => setSelectedRoute(e)}
+            collapsed={offendersCollapsed}
+            onToggleCollapsed={() => setOffendersCollapsed((c) => !c)}
+          />
+
+          <details className="session-history-details">
+            <summary>Collector session &amp; history (cumulative-since-restart metrics)</summary>
+            <KpiPanel costs={costs} fetchError={fetchError} />
+            <CostHistoryChart range={historyRange} onRangeChange={setHistoryRange} history={history.data} loading={history.loading} error={history.error} />
+          </details>
+        </main>
+      </div>
 
       <footer>
         ZoneTax · polling every 10s ·{' '}
