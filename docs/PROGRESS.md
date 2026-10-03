@@ -76,3 +76,6 @@ sessions start with full context. Next: Helm repo publish, then CLI, then genera
   default (PVC rendered "0"); template now defaults to 1Gi.
 - Live test on dev: deleted the collector pod, new pod logged "restored history", history start
   unchanged, totals continued (371 MB -> 405 MB), 15m window across restart = incomplete.
+- Follow-up live checks: a window ending between the last periodic save and the pod kill had
+  routes (so the shutdown save ran); a window inside history spanning the restart is
+  complete=false, while windows entirely before or after it are complete=true.
