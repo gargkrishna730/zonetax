@@ -346,3 +346,39 @@ func almostEqualHistory(a, b float64) bool {
 	}
 	return d < 1e-9
 }
+
+func TestHistory_CompactDownsamplesOldSnapshots(t *testing.T) {
+	h := NewHistory(7 * 24)
+	base := mustParse(t, "2026-10-01T00:00:00Z")
+	// 7 days of 30s snapshots, cumulative counters growing 0.01 GB per scrape on one route.
+	n := 7 * 24 * 120
+	for i := 0; i <= n; i++ {
+		gb := float64(i) * 0.01
+		h.Record(base.Add(time.Duration(i)*30*time.Second), gb*0.02, gb, 0,
+			[]costengine.Entry{fakeEntry("a", "b", "web", "db", gb, gb*0.02)})
+	}
+	now := base.Add(time.Duration(n) * 30 * time.Second)
+	// ~7d*24*12 five-minute slots + 120 full-res snapshots in the last hour.
+	if got := len(h.snaps); got > 7*24*12+130 {
+		t.Fatalf("expected downsampled history, got %d snapshots", got)
+	}
+	// Full-resolution window keeps every scrape: a 15m window is exact.
+	d, hasData, complete := h.EntriesRange(now.Add(-15*time.Minute), now, time.Minute)
+	if !hasData || !complete || len(d) != 1 || d[0].GB < 0.299 || d[0].GB > 0.301 {
+		t.Fatalf("15m window wrong: %+v hasData=%v complete=%v", d, hasData, complete)
+	}
+	// Old windows stay exact at 5-minute boundaries: 24h ending 2h ago = 2880 scrapes.
+	end := now.Add(-2 * time.Hour)
+	d, hasData, _ = h.EntriesRange(end.Add(-24*time.Hour), end, time.Minute)
+	if !hasData || len(d) != 1 || d[0].GB < 28.79 || d[0].GB > 28.81 {
+		t.Fatalf("24h window wrong: %+v", d)
+	}
+	// Hourly buckets still sum to the real total over the 7 days.
+	total := 0.0
+	for _, b := range h.Buckets(base, now, time.Hour) {
+		total += b.CrossAZGB
+	}
+	if want := float64(n) * 0.01; total < want-0.01 || total > want+0.01 {
+		t.Fatalf("bucket total %.3f, want %.3f", total, want)
+	}
+}

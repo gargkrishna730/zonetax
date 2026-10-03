@@ -89,6 +89,42 @@ func (h *History) Record(at time.Time, crossAZCost, crossAZGB, sameAZGB float64,
 	if i > 1 {
 		h.snaps = h.snaps[i-1:]
 	}
+	h.compact(at)
+}
+
+// Downsampling policy: snapshots newer than fullResolutionWindow keep every scrape (so short
+// 15m/1h windows stay precise); older ones keep only the first snapshot in each
+// downsampleStep slot. Without this, 7 days of 30s snapshots (~20k, each holding a per-route
+// map) pinned the collector at its memory limit and GC thrashing made scrapes and API calls
+// time out. 7d now needs ~2k snapshots instead of ~20k.
+const (
+	fullResolutionWindow = time.Hour
+	downsampleStep       = 5 * time.Minute
+)
+
+// compact applies the downsampling policy in place. Snapshots are time ordered, so one pass
+// suffices. Counter resets that fall between two kept snapshots are still handled by
+// resolveDelta, at slightly coarser resolution.
+func (h *History) compact(now time.Time) {
+	cutoff := now.Add(-fullResolutionWindow)
+	out := h.snaps[:0]
+	var lastSlot time.Time
+	haveSlot := false
+	for _, s := range h.snaps {
+		if s.at.Before(cutoff) {
+			slot := s.at.Truncate(downsampleStep)
+			if haveSlot && slot.Equal(lastSlot) {
+				continue
+			}
+			lastSlot, haveSlot = slot, true
+		}
+		out = append(out, s)
+	}
+	// Clear dropped tail references so their route maps can be garbage collected.
+	for j := len(out); j < len(h.snaps); j++ {
+		h.snaps[j] = snapshot{}
+	}
+	h.snaps = out
 }
 
 // RouteDelta is one route's real observed cost/traffic delta over a requested time window.

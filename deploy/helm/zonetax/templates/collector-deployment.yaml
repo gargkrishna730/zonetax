@@ -22,6 +22,13 @@ spec:
         - name: collector
           image: "{{ .Values.collector.image.repository }}:{{ .Values.collector.image.tag }}"
           imagePullPolicy: {{ .Values.collector.image.pullPolicy }}
+          env:
+            # Let the Go GC track the container memory limit instead of growing until OOM.
+            - name: GOMEMLIMIT
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.memory
+                  divisor: "1"
           ports:
             - containerPort: 8080
               name: http
