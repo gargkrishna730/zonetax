@@ -37,3 +37,6 @@ go.work.sum
 /ui/app/node_modules/
 /ui/dist/
 debug-recordings/
+
+# Local agent notes (private, env-specific)
+.jcode/
