@@ -35,7 +35,9 @@ flowchart LR
 | `internal/podindex`, `azmap` | client-go informers, IP to pod/workload, node label `topology.kubernetes.io/zone` |
 | `internal/aggregator`, `metrics` | Per (srcAZ, dstAZ, ns, workload, dst_workload) byte counters |
 | `internal/scrape`, `costengine`, `pricing` | Collector side: scrape, apply YAML price table ($0.01/GB each direction) |
-| `internal/collector/history.go` | In-memory hourly buckets via snapshot diffing, honest `has_data`/`complete` flags |
+| `internal/collector/history.go` | Hourly buckets via snapshot diffing, honest `has_data`/`complete`, gap markers for downtime |
+| `internal/collector/accumulate.go` | Per-agent observed deltas (failed scrape / new agent / reset never spike) |
+| `internal/collector/persist.go` | Save/Load history file (gzip JSON, atomic). `HISTORY_FILE=/data/history.json.gz` |
 | `internal/api` | `/healthz`, `/api/v1/costs`, `/top`, `/history?range=1h\|6h\|24h\|7d`, `/map` |
 | `ui/app` | Vite + React 19 + TS + @xyflow/react. Vitest + Testing Library |
 | `deploy/helm/zonetax` | Helm chart, source of truth. Image tag defaults to appVersion |
@@ -77,8 +79,11 @@ The collector embeds `ui/dist`, so build the UI before building the collector im
   memory fix (history downsampling + GOMEMLIMIT, 2026-10-03).
 - **Released v0.1.0 (2026-10-03).** Helm repo live at https://gargkrishna730.github.io/zonetax,
   Pages enabled on `gh-pages`. Next release: just push a new `vX.Y.Z` tag.
-- Dev cluster still runs the `latest`-tagged install from Helm revision 6 (pre-v0.1.0 chart).
-- **Next:** M4 alerting (Slack webhook), persistent history, eBPF, multi-cloud.
+- Dev cluster: Helm release uses `latest` images + PVC (values in a local file, see overlay).
+  `helm --wait` reports failed because one agent pod is Pending on a memory-full node; resources
+  still apply. Upgrade with `-f values`, never `--reuse-values` (drops new chart defaults).
+- v0.2.0: persistent history (2026-10-03). Dev runs it with `collector.persistence.enabled=true`.
+- **Next:** M4 alerting (Slack webhook), eBPF, multi-cloud.
 
 ## Memory system (how context survives)
 

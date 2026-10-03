@@ -119,6 +119,17 @@ helm install zonetax zonetax/zonetax -n zonetax --create-namespace
 kubectl apply -f https://github.com/gargkrishna730/zonetax/releases/latest/download/install.yaml
 ```
 
+**Keep history across restarts** (optional, recommended): cost history is always saved to the
+collector's `/data` volume every 5 minutes and on shutdown. By default that is an `emptyDir`
+(survives crashes, not pod replacement). For a volume that survives rollouts and node moves:
+
+```bash
+helm install zonetax zonetax/zonetax -n zonetax --create-namespace \
+  --set collector.persistence.enabled=true   # 1Gi PVC, e.g. EBS gp3 ~ $0.08/month
+```
+
+Time the collector was down shows as "no data", never as $0, and is never back-filled.
+
 **Open the dashboard:**
 
 ```bash

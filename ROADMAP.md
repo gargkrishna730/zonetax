@@ -112,7 +112,9 @@ Scope: AWS/EKS first. Conntrack-based sampling for MVP (eBPF is a possible v2).
 - [x] **M5** — CLI (`zonetax top`, `zonetax report --range 24h`) hitting the collector API,
       released as binaries on tags. Helm repo on GitHub Pages and generated raw manifests
       (`deploy/manifests/install.yaml`) shipped alongside.
-- [ ] **M6** — Polish: blog writeup, persistent history (survive collector restarts).
+- [x] **Persistent history** (v0.2.0) — saved to a file every 5 min + on shutdown, emptyDir by
+      default, optional PVC; downtime reported as gaps, never back-filled.
+- [ ] **M6** — Polish: blog writeup.
       Done already: multi-arch CI images, demo GIF, CONTRIBUTING.md, Helm repo publishing.
 
 ## Known limitations (post-M1)
@@ -143,4 +145,4 @@ Scope: AWS/EKS first. Conntrack-based sampling for MVP (eBPF is a possible v2).
 - Multi-cloud (GCP/Azure) — architecture should stay portable, but AWS is the only implementation.
 - Full eBPF — conntrack sampling first; revisit if accuracy/perf demands it.
 - Automated remediation (topology spread, pod affinity) — ZoneTax is observability-first.
-- Historical cost storage beyond Prometheus retention — no bundled long-term TSDB in MVP.
+- Long-term cost storage (>7 days) — no bundled TSDB. History is a small file, 7-day retention.

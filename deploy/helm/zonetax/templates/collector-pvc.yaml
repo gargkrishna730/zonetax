@@ -17,5 +17,5 @@ spec:
   {{- end }}
   resources:
     requests:
-      storage: {{ .Values.collector.persistence.size }}
+      storage: {{ .Values.collector.persistence.size | default "1Gi" }}
 {{- end }}

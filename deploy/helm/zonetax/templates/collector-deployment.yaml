@@ -10,9 +10,13 @@ spec:
   replicas: {{ .Values.collector.replicas }}
   {{- if .Values.collector.persistence.enabled }}
   # A ReadWriteOnce EBS volume can only attach to one pod: stop the old pod before starting
-  # the new one on rollouts.
+  # the new one. Done with maxSurge 0 rather than type: Recreate, because switching an existing
+  # Deployment's strategy type is rejected on upgrade (leftover rollingUpdate fields).
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   {{- end }}
   selector:
     matchLabels:

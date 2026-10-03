@@ -45,7 +45,6 @@ timeline
 
 - Alerting (M4) not started.
 - DaemonSet rollouts can stall on memory-pressured nodes (delete pods manually).
-- History is in-memory, lost on collector restart.
 
 ## Session log
 
@@ -65,3 +64,15 @@ sessions start with full context. Next: Helm repo publish, then CLI, then genera
 - Released **v0.1.0**: GitHub Release (4 CLI binaries, chart, install.yaml, checksums), images
   tagged 0.1.0, Helm repo on GitHub Pages. Verified as a new user: `helm repo add` + `search` +
   `template` (pinned 0.1.0 images), install.yaml kubectl dry-run, downloaded CLI binary runs.
+
+### 2026-10-03 (part 3): persistent history, v0.2.0
+- History saved to `/data/history.json.gz` every 5 min + on shutdown, reloaded on start.
+  7 days x 40 routes measured at ~0.7 MB. emptyDir default, `collector.persistence.enabled` PVC.
+- Downtime is a gap marker: fully-down hours = no data, partly-down = partial, never back-filled.
+- Found while designing it: history diffed raw merged agent totals, so one failed agent scrape
+  made the next cycle look like a counter reset (fake spike). Now per-agent observed deltas.
+- Found deploying it: switching an existing Deployment to `type: Recreate` is rejected by the
+  API server; used RollingUpdate maxSurge 0 instead. `--reuse-values` dropped the new `size`
+  default (PVC rendered "0"); template now defaults to 1Gi.
+- Live test on dev: deleted the collector pod, new pod logged "restored history", history start
+  unchanged, totals continued (371 MB -> 405 MB), 15m window across restart = incomplete.
