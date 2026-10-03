@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "zonetax.fullname" . }}-collector
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "zonetax.labels" . | nindent 4 }}
     app.kubernetes.io/component: collector
@@ -20,7 +21,7 @@ spec:
       serviceAccountName: {{ include "zonetax.serviceAccountName" . }}
       containers:
         - name: collector
-          image: "{{ .Values.collector.image.repository }}:{{ .Values.collector.image.tag }}"
+          image: "{{ .Values.collector.image.repository }}:{{ .Values.collector.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.collector.image.pullPolicy }}
           env:
             # Let the Go GC track the container memory limit instead of growing until OOM.
@@ -39,6 +40,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: {{ include "zonetax.fullname" . }}-collector
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "zonetax.labels" . | nindent 4 }}
     app.kubernetes.io/component: collector

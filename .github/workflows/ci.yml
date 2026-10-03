@@ -47,5 +47,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
+        with:
+          version: v4.3.0
       - name: Helm lint
         run: helm lint deploy/helm/zonetax
+      - name: Raw manifests are up to date with the chart
+        run: |
+          ./hack/gen-manifests.sh
+          git diff --exit-code deploy/manifests/install.yaml || {
+            echo "deploy/manifests/install.yaml is stale. Run ./hack/gen-manifests.sh and commit."; exit 1; }

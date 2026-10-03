@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: {{ include "zonetax.fullname" . }}-agent
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "zonetax.labels" . | nindent 4 }}
     app.kubernetes.io/component: agent
@@ -36,7 +37,7 @@ spec:
       {{- end }}
       containers:
         - name: agent
-          image: "{{ .Values.agent.image.repository }}:{{ .Values.agent.image.tag }}"
+          image: "{{ .Values.agent.image.repository }}:{{ .Values.agent.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.agent.image.pullPolicy }}
           securityContext:
             runAsUser: 0

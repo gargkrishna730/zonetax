@@ -1,8 +1,9 @@
 agent:
   image:
     repository: ghcr.io/gargkrishna730/zonetax-agent
-    tag: "latest"
-    pullPolicy: Always
+    # Defaults to the chart's appVersion (the release tag). Set e.g. "latest" to track main.
+    tag: ""
+    pullPolicy: IfNotPresent
   sampleIntervalSeconds: 15
   # Enables byte-count accounting in the kernel's conntrack table via a privileged init
   # container that sets net.netfilter.nf_conntrack_acct=1 on the node. Required for non-zero
@@ -21,8 +22,9 @@ agent:
 collector:
   image:
     repository: ghcr.io/gargkrishna730/zonetax-collector
-    tag: "latest"
-    pullPolicy: Always
+    # Defaults to the chart's appVersion (the release tag). Set e.g. "latest" to track main.
+    tag: ""
+    pullPolicy: IfNotPresent
   replicas: 1
   service:
     type: ClusterIP
