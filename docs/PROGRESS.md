@@ -15,7 +15,7 @@ timeline
   2026-09-06 : Cross-AZ Service Map redesign : /api/v1/map : Filter + incomplete-window bugs fixed
   2026-09-07 : Removed internal names : Cost FAQ in README : Demo GIF
   2026-09-08 : Agreed next plan, Helm repo publish, CLI, raw manifests
-  2026-10-03 : Moved from Hermes to Jcode, added AGENTS.md + PROGRESS.md
+  2026-10-03 : Moved to Jcode, AGENTS.md + PROGRESS.md : CLI (M5) : Helm repo + raw manifests + release workflow : Collector memory fix
 ```
 
 ## Key decisions
@@ -43,9 +43,6 @@ timeline
 
 ## Known open items
 
-- CLI is a stub (`cmd/zonetax-cli/main.go`).
-- No published Helm repo, README quickstart says "Coming soon".
-- No raw manifests.
 - Alerting (M4) not started.
 - DaemonSet rollouts can stall on memory-pressured nodes (delete pods manually).
 - History is in-memory, lost on collector restart.
@@ -56,3 +53,12 @@ timeline
 Previous Hermes session (2026-09-02 to 2026-09-24, ~3500 messages) exhausted its context. Recovered
 state from the Hermes session DB, wrote `AGENTS.md` (auto-loaded brief) and this file so future
 sessions start with full context. Next: Helm repo publish, then CLI, then generated manifests.
+
+### 2026-10-03 (Jcode, part 2): CLI, Helm, release
+- `cmd/zonetax` CLI (`top`, `report`, `version`), tests against a fake collector.
+- Found live: collector up 25 days at its 256Mi limit, all agent scrapes timing out, `/costs`
+  taking ~60s. Cause: history kept every 30s snapshot for 7 days (~20k, each with a route map).
+  Fix: snapshots older than 1h downsampled to 5-min slots (~2k for 7d), plus GOMEMLIMIT.
+- `release.yml` on tag publishes CLI binaries, chart, install.yaml, and the gh-pages Helm index.
+- `hack/gen-manifests.sh` generates `deploy/manifests/install.yaml`, CI drift check.
+- Chart: image tag defaults to appVersion (was `latest`), explicit namespaces.

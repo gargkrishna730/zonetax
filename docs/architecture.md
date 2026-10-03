@@ -31,10 +31,10 @@
 - Primary view: live Sankey/chord diagram of $ cost flowing between AZs.
 - Secondary view: top-offenders table (namespace/workload ranked by cross-AZ $ spend).
 
-### CLI (`cmd/zonetax-cli`)
-- Thin HTTP client against the collector's REST API.
-- `zonetax top` — current top cross-AZ cost offenders.
-- `zonetax report --since 1h` — cost summary over a time window.
+### CLI (`cmd/zonetax`)
+- Thin HTTP client against the collector's REST API (`/api/v1/map`, `/api/v1/history`).
+- `zonetax top [--range 24h] [-n 10]` — top cross-AZ routes by cost for a window.
+- `zonetax report [--range 24h]` — totals, zone-pair breakdown, hourly buckets.
 
 ## Data flow
 

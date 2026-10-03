@@ -106,22 +106,58 @@ you're not confused seeing ZoneTax's own name in its own numbers.
 
 ## Quickstart
 
+**Helm** (recommended):
+
 ```bash
-# Coming soon:
 helm repo add zonetax https://gargkrishna730.github.io/zonetax
 helm install zonetax zonetax/zonetax -n zonetax --create-namespace
 ```
 
+**Plain kubectl** (same resources, generated from the Helm chart):
+
+```bash
+kubectl apply -f https://github.com/gargkrishna730/zonetax/releases/latest/download/install.yaml
+```
+
+**Open the dashboard:**
+
+```bash
+kubectl -n zonetax port-forward svc/zonetax-collector 8080:8080
+# then open http://localhost:8080
+```
+
+## CLI
+
+A small terminal client for the same data. Download a binary from
+[Releases](https://github.com/gargkrishna730/zonetax/releases) or `go install
+github.com/gargkrishna730/zonetax/cmd/zonetax@latest`.
+
+```bash
+kubectl -n zonetax port-forward svc/zonetax-collector 8080:8080 &
+
+zonetax top                 # top 10 cross-AZ routes by cost, last 24h
+zonetax top --range 1h -n 20
+zonetax report --range 7d   # totals, zone-pair breakdown, hourly cost
+zonetax top --json          # raw API JSON for scripts
+```
+
+Ranges: `15m`, `1h`, `6h`, `24h`, `7d`. Use `--url` or `ZONETAX_URL` if the collector is not on
+`localhost:8080`. Partial windows and hours with no data are labeled as such, never shown as $0.
+
 ## Development
 
-Requires Go 1.25+.
+Requires Go 1.25+, Node 22, Helm.
 
 ```bash
 git clone https://github.com/gargkrishna730/zonetax.git
 cd zonetax
-go build ./...
-go test ./...
+(cd ui/app && npm ci && npm run build)   # collector embeds the UI
+go build ./... && go test ./...
+./hack/gen-manifests.sh                  # after any change under deploy/helm
 ```
+
+**Releasing:** push a tag `vX.Y.Z`. CI builds multi-arch images, CLI binaries, the chart, the
+raw manifest, and updates the Helm repo.
 
 ## License
 

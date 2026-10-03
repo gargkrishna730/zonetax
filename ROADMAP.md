@@ -109,9 +109,11 @@ Scope: AWS/EKS first. Conntrack-based sampling for MVP (eBPF is a possible v2).
          close button, backdrop, filters/search/focus/positions all carry over since it's the same
          ReactFlow instance reparented, not a second diagram).
 - [ ] **M4** — Alerting: Slack webhook on $/hour threshold breach.
-- [ ] **M5** — CLI (`zonetax top`, `zonetax report --since 1h`) hitting the collector API.
-- [ ] **M6** — Polish: multi-arch CI images, demo GIF against a real multi-AZ EKS cluster,
-      CONTRIBUTING.md, Helm repo publishing, blog writeup.
+- [x] **M5** — CLI (`zonetax top`, `zonetax report --range 24h`) hitting the collector API,
+      released as binaries on tags. Helm repo on GitHub Pages and generated raw manifests
+      (`deploy/manifests/install.yaml`) shipped alongside.
+- [ ] **M6** — Polish: blog writeup, persistent history (survive collector restarts).
+      Done already: multi-arch CI images, demo GIF, CONTRIBUTING.md, Helm repo publishing.
 
 ## Known limitations (post-M1)
 
