@@ -22,7 +22,7 @@ ZoneTax is a lightweight, Kubernetes-native tool that:
 
 ## Status
 
-🚧 Early development (pre-v0.1). AWS/EKS only for now. See [ROADMAP.md](./ROADMAP.md).
+🚀 [v0.1.0](https://github.com/gargkrishna730/zonetax/releases/tag/v0.1.0) released. Early stage, AWS/EKS only for now. See [ROADMAP.md](./ROADMAP.md).
 
 ## Does ZoneTax cost anything to run?
 

@@ -75,8 +75,9 @@ The collector embeds `ui/dist`, so build the UI before building the collector im
 - Done: M0 to M3, M5 CLI, accuracy fix (~80x to ~4x vs AWS bill), observability redesign, service
   map, cost FAQ, demo GIF, Helm repo + raw manifest + release workflow (2026-10-03), collector
   memory fix (history downsampling + GOMEMLIMIT, 2026-10-03).
-- **To release:** tag `v0.1.0` and push. Then enable GitHub Pages on the `gh-pages` branch
-  (repo Settings > Pages) the first time, so `helm repo add` works.
+- **Released v0.1.0 (2026-10-03).** Helm repo live at https://gargkrishna730.github.io/zonetax,
+  Pages enabled on `gh-pages`. Next release: just push a new `vX.Y.Z` tag.
+- Dev cluster still runs the `latest`-tagged install from Helm revision 6 (pre-v0.1.0 chart).
 - **Next:** M4 alerting (Slack webhook), persistent history, eBPF, multi-cloud.
 
 ## Memory system (how context survives)

@@ -62,3 +62,6 @@ sessions start with full context. Next: Helm repo publish, then CLI, then genera
 - `release.yml` on tag publishes CLI binaries, chart, install.yaml, and the gh-pages Helm index.
 - `hack/gen-manifests.sh` generates `deploy/manifests/install.yaml`, CI drift check.
 - Chart: image tag defaults to appVersion (was `latest`), explicit namespaces.
+- Released **v0.1.0**: GitHub Release (4 CLI binaries, chart, install.yaml, checksums), images
+  tagged 0.1.0, Helm repo on GitHub Pages. Verified as a new user: `helm repo add` + `search` +
+  `template` (pinned 0.1.0 images), install.yaml kubectl dry-run, downloaded CLI binary runs.
