@@ -78,3 +78,10 @@ The collector embeds `ui/dist`, so build the UI before building the collector im
   3. Generated raw manifests: `helm template` into `deploy/manifests/install.yaml` via script/CI,
      single source of truth is the Helm chart.
   4. Later: M4 alerting (Slack webhook), eBPF, multi-cloud.
+
+## Memory system (how context survives)
+
+- `AGENTS.md` (this file): auto-loaded every session. Brief, rules, status.
+- `docs/PROGRESS.md`: timeline, decisions, session log. Append an entry per session.
+- `.jcode/prompt-overlay.md`: gitignored private ops notes (cluster context, accounts).
+- Jcode memory: user preferences and project pointer.
