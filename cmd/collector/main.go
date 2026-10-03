@@ -41,6 +41,7 @@ func main() {
 		ScrapeTimeout:  envDurationOr("SCRAPE_TIMEOUT_SECONDS", defaultScrapeTimeout),
 		Cloud:          envOr("CLOUD_PROVIDER", "aws"),
 		Region:         envOr("CLOUD_REGION", "us-east-1"),
+		HistoryFile:    os.Getenv("HISTORY_FILE"),
 	}
 
 	clientset, err := inClusterClientset()
@@ -52,7 +53,11 @@ func main() {
 	defer cancel()
 
 	store := &collector.Store{}
-	go collector.Run(ctx, clientset, table, cfg, store)
+	runDone := make(chan struct{})
+	go func() {
+		defer close(runDone)
+		collector.Run(ctx, clientset, table, cfg, store)
+	}()
 
 	handler := api.NewHandler(store)
 	mux := http.NewServeMux()
@@ -80,6 +85,12 @@ func main() {
 
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("server error: %v", err)
+	}
+	// Let Run finish its final history save before the process exits.
+	select {
+	case <-runDone:
+	case <-time.After(10 * time.Second):
+		log.Println("timed out waiting for final history save")
 	}
 }
 

@@ -6,6 +6,7 @@ package collector
 
 import (
 	"context"
+	"errors"
 	"log"
 	"sync"
 	"time"
@@ -26,6 +27,10 @@ type Config struct {
 	ScrapeTimeout  time.Duration
 	Cloud          string
 	Region         string
+	// HistoryFile, if set, is where History is saved (every SaveInterval and on shutdown)
+	// and loaded from on startup, so history survives collector restarts.
+	HistoryFile  string
+	SaveInterval time.Duration
 }
 
 // Store holds the most recently computed cost Summary, safe for concurrent read (API handlers)
@@ -45,6 +50,7 @@ type Store struct {
 	startedAt      time.Time
 	scrapeInterval time.Duration
 	history        *History
+	acc            *accumulator
 }
 
 // maxHistoryHours bounds History's memory to 7 days of hourly buckets — the longest range this
@@ -114,8 +120,40 @@ func (s *Store) set(summary costengine.Summary, err error) {
 		}
 		s.latest = summary
 		s.updated = now
-		s.ensureHistoryLocked().Record(now, summary.TotalCrossAZCost, summary.TotalCrossAZGB, summary.TotalSameAZGB, summary.Entries)
 	}
+}
+
+// observe folds each successfully scraped agent into the observed-traffic accumulator and
+// records the result in History. Failed agents are simply absent from perAgent.
+func (s *Store) observe(perAgent map[string]costengine.Summary, now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.acc == nil {
+		s.acc = newAccumulator()
+	}
+	for name, sum := range perAgent {
+		s.acc.observe(name, sum, now)
+	}
+	s.acc.prune(now)
+	cost, gb, same, entries := s.acc.totals()
+	s.ensureHistoryLocked().Record(now, cost, gb, same, entries)
+}
+
+// loadHistory restores saved history from path and continues the observed totals from its
+// last snapshot. Downtime since that snapshot is marked as a gap (shown as no data).
+func (s *Store) loadHistory(path string) error {
+	h := s.History()
+	if err := h.Load(path, time.Now()); err != nil {
+		return err
+	}
+	h.MarkGap()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.acc = newAccumulator()
+	if last, ok := h.last(); ok {
+		s.acc.seed(last)
+	}
+	return nil
 }
 
 // Run starts the periodic collection loop, blocking until ctx is cancelled. Each cycle:
@@ -123,6 +161,26 @@ func (s *Store) set(summary costengine.Summary, err error) {
 // failure (or a single unreachable agent) logs and is retried next tick rather than crashing.
 func Run(ctx context.Context, clientset kubernetes.Interface, table *pricing.Table, cfg Config, store *Store) {
 	store.setScrapeInterval(cfg.ScrapeInterval)
+
+	var saveC <-chan time.Time
+	if cfg.HistoryFile != "" {
+		switch err := store.loadHistory(cfg.HistoryFile); {
+		case err == nil:
+			log.Printf("collector: restored history from %s (since %s)", cfg.HistoryFile, store.History().EarliestSnapshot().UTC().Format(time.RFC3339))
+		case errors.Is(err, ErrNoHistoryFile):
+			log.Printf("collector: no saved history at %s, starting fresh", cfg.HistoryFile)
+		default:
+			log.Printf("collector: could not load history (%v), starting fresh", err)
+		}
+		every := cfg.SaveInterval
+		if every <= 0 {
+			every = 5 * time.Minute
+		}
+		t := time.NewTicker(every)
+		defer t.Stop()
+		saveC = t.C
+		defer saveHistory(store, cfg.HistoryFile)
+	}
 
 	ticker := time.NewTicker(cfg.ScrapeInterval)
 	defer ticker.Stop()
@@ -134,7 +192,15 @@ func Run(ctx context.Context, clientset kubernetes.Interface, table *pricing.Tab
 			return
 		case <-ticker.C:
 			collectOnce(ctx, clientset, table, cfg, store)
+		case <-saveC:
+			saveHistory(store, cfg.HistoryFile)
 		}
+	}
+}
+
+func saveHistory(store *Store, path string) {
+	if err := store.History().Save(path); err != nil {
+		log.Printf("collector: save history to %s: %v", path, err)
 	}
 }
 
@@ -160,6 +226,18 @@ func collectOnce(ctx context.Context, clientset kubernetes.Interface, table *pri
 	}
 
 	store.set(summary, nil)
+
+	perAgent := make(map[string]costengine.Summary, len(results))
+	for _, r := range results {
+		if r.Err != nil {
+			continue
+		}
+		if s, err := costengine.Compute(r.Metrics, table, cfg.Cloud, cfg.Region); err == nil {
+			perAgent[r.Target.PodName] = s
+		}
+	}
+	store.observe(perAgent, time.Now())
+
 	log.Printf("collector: cycle complete: %d agents, %d cross-AZ entries, $%.4f total",
 		len(targets), len(summary.Entries), summary.TotalCrossAZCost)
 }

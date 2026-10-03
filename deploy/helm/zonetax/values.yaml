@@ -26,6 +26,16 @@ collector:
     tag: ""
     pullPolicy: IfNotPresent
   replicas: 1
+  # Cost history is saved to /data every 5 minutes and on shutdown, and reloaded on start.
+  # Default (persistence.enabled=false): an emptyDir, which survives container crashes and
+  # OOM restarts but not pod replacement (rollouts, node moves).
+  # persistence.enabled=true: a small PVC (e.g. EBS gp3, ~$0.08/month for 1Gi) that survives
+  # everything. Note EBS volumes are zonal, so the collector stays in the volume's AZ.
+  persistence:
+    enabled: false
+    size: 1Gi
+    storageClass: ""     # empty = cluster default
+    existingClaim: ""    # use a pre-created PVC instead
   service:
     type: ClusterIP
     port: 8080

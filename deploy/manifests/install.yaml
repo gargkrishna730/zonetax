@@ -169,6 +169,10 @@ spec:
         app.kubernetes.io/component: collector
     spec:
       serviceAccountName: zonetax
+      # Graceful shutdown writes a final history save.
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        fsGroup: 65532
       containers:
         - name: collector
           image: "ghcr.io/gargkrishna730/zonetax-collector:0.1.0"
@@ -180,9 +184,14 @@ spec:
                 resourceFieldRef:
                   resource: limits.memory
                   divisor: "1"
+            - name: HISTORY_FILE
+              value: /data/history.json.gz
           ports:
             - containerPort: 8080
               name: http
+          volumeMounts:
+            - name: data
+              mountPath: /data
           resources:
             limits:
               cpu: 500m
@@ -190,3 +199,7 @@ spec:
             requests:
               cpu: 100m
               memory: 128Mi
+      volumes:
+        - name: data
+          emptyDir:
+            sizeLimit: 64Mi

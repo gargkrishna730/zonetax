@@ -1,0 +1,21 @@
+{{- if and .Values.collector.persistence.enabled (not .Values.collector.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "zonetax.fullname" . }}-collector-data
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "zonetax.labels" . | nindent 4 }}
+    app.kubernetes.io/component: collector
+  annotations:
+    # Keep collected history if the chart is uninstalled.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.collector.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.collector.persistence.size }}
+{{- end }}

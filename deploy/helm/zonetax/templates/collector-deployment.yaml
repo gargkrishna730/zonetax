@@ -8,6 +8,12 @@ metadata:
     app.kubernetes.io/component: collector
 spec:
   replicas: {{ .Values.collector.replicas }}
+  {{- if .Values.collector.persistence.enabled }}
+  # A ReadWriteOnce EBS volume can only attach to one pod: stop the old pod before starting
+  # the new one on rollouts.
+  strategy:
+    type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       {{- include "zonetax.selectorLabels" . | nindent 6 }}
@@ -19,6 +25,10 @@ spec:
         app.kubernetes.io/component: collector
     spec:
       serviceAccountName: {{ include "zonetax.serviceAccountName" . }}
+      # Graceful shutdown writes a final history save.
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        fsGroup: 65532
       containers:
         - name: collector
           image: "{{ .Values.collector.image.repository }}:{{ .Values.collector.image.tag | default .Chart.AppVersion }}"
@@ -30,11 +40,25 @@ spec:
                 resourceFieldRef:
                   resource: limits.memory
                   divisor: "1"
+            - name: HISTORY_FILE
+              value: /data/history.json.gz
           ports:
             - containerPort: 8080
               name: http
+          volumeMounts:
+            - name: data
+              mountPath: /data
           resources:
             {{- toYaml .Values.collector.resources | nindent 12 }}
+      volumes:
+        - name: data
+          {{- if .Values.collector.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.collector.persistence.existingClaim | default (printf "%s-collector-data" (include "zonetax.fullname" .)) }}
+          {{- else }}
+          emptyDir:
+            sizeLimit: 64Mi
+          {{- end }}
 ---
 apiVersion: v1
 kind: Service

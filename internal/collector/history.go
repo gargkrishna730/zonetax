@@ -17,6 +17,7 @@
 package collector
 
 import (
+	"sync"
 	"time"
 
 	"github.com/gargkrishna730/zonetax/internal/costengine"
@@ -47,13 +48,19 @@ type snapshot struct {
 	crossAZGB   float64
 	sameAZGB    float64
 	entries     map[entryKey]entryVal
+	// afterGap marks the first snapshot recorded after the collector was down. The interval
+	// between the previous snapshot and this one was never observed, so any window overlapping
+	// it is reported as partial (or no data if entirely inside it), never as a complete $0.
+	afterGap bool
 }
 
 // History accumulates cumulative-total snapshots and derives hourly cost/traffic deltas from
 // them. Safe for concurrent use.
 type History struct {
+	mu       sync.RWMutex
 	maxHours int
 	snaps    []snapshot
+	gapNext  bool
 }
 
 // NewHistory returns an empty History retaining at most maxHours hours of snapshots.
@@ -64,11 +71,21 @@ func NewHistory(maxHours int) *History {
 	return &History{maxHours: maxHours}
 }
 
+// MarkGap flags the next recorded snapshot as following a period the collector did not observe
+// (called after loading saved history on startup).
+func (h *History) MarkGap() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.snaps) > 0 {
+		h.gapNext = true
+	}
+}
+
 // Record appends a new cumulative-total snapshot (plus a per-route breakdown, keyed by
-// src/dst zone + src/dst workload) and evicts anything older than maxHours. Not safe to call
-// concurrently with itself (Store serializes access via its own mutex — see Store.set/
-// Store.History, which is the only intended caller).
+// src/dst zone + src/dst workload) and evicts anything older than maxHours.
 func (h *History) Record(at time.Time, crossAZCost, crossAZGB, sameAZGB float64, routeEntries []costengine.Entry) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	entries := make(map[entryKey]entryVal, len(routeEntries))
 	for _, e := range routeEntries {
 		entries[entryKey{
@@ -77,7 +94,8 @@ func (h *History) Record(at time.Time, crossAZCost, crossAZGB, sameAZGB float64,
 			dstNamespace: e.DstNamespace, dstWorkload: e.DstWorkload,
 		}] = entryVal{gb: e.GB, costUSD: e.CostUSD}
 	}
-	h.snaps = append(h.snaps, snapshot{at: at, crossAZCost: crossAZCost, crossAZGB: crossAZGB, sameAZGB: sameAZGB, entries: entries})
+	h.snaps = append(h.snaps, snapshot{at: at, crossAZCost: crossAZCost, crossAZGB: crossAZGB, sameAZGB: sameAZGB, entries: entries, afterGap: h.gapNext})
+	h.gapNext = false
 	cutoff := at.Add(-time.Duration(h.maxHours) * time.Hour)
 	i := 0
 	for i < len(h.snaps) && h.snaps[i].at.Before(cutoff) {
@@ -89,6 +107,7 @@ func (h *History) Record(at time.Time, crossAZCost, crossAZGB, sameAZGB float64,
 	if i > 1 {
 		h.snaps = h.snaps[i-1:]
 	}
+	h.snaps[0].afterGap = false // nothing retained before it to have a gap from
 	h.compact(at)
 }
 
@@ -113,7 +132,8 @@ func (h *History) compact(now time.Time) {
 	for _, s := range h.snaps {
 		if s.at.Before(cutoff) {
 			slot := s.at.Truncate(downsampleStep)
-			if haveSlot && slot.Equal(lastSlot) {
+			// Never drop a gap marker: it is what keeps downtime visible as missing data.
+			if haveSlot && slot.Equal(lastSlot) && !s.afterGap {
 				continue
 			}
 			lastSlot, haveSlot = slot, true
@@ -157,6 +177,8 @@ type RouteDelta struct {
 // Pass 0 to require an exact match (preserves the old, stricter behavior for tests/callers that
 // want it); real callers should pass a small multiple of the collector's scrape interval.
 func (h *History) EntriesRange(since, now time.Time, freshnessTolerance time.Duration) (deltas []RouteDelta, hasData bool, complete bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	if len(h.snaps) == 0 {
 		return nil, false, false
 	}
@@ -208,7 +230,8 @@ func (h *History) EntriesRange(since, now time.Time, freshnessTolerance time.Dur
 		})
 	}
 	staleness := now.Sub(mostRecentSnapshotTime(h.snaps))
-	complete = !usedFallback && staleness <= freshnessTolerance
+	overlapsGap, _ := gapOverlap(h.snaps, since, now)
+	complete = !usedFallback && !overlapsGap && staleness <= freshnessTolerance
 	return deltas, true, complete
 }
 
@@ -240,6 +263,8 @@ type Bucket struct {
 // with no snapshots at all) by treating that portion of the range as having no attributable
 // delta rather than computing a nonsensical negative number — see resolveDelta.
 func (h *History) Buckets(since, now time.Time, bucketSize time.Duration) []Bucket {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	if bucketSize <= 0 {
 		bucketSize = time.Hour
 	}
@@ -293,7 +318,12 @@ func (h *History) Buckets(since, now time.Time, bucketSize time.Duration) []Buck
 			gbDelta = resolveDelta(baseline.crossAZGB, latest.crossAZGB)
 			sameDelta = resolveDelta(baseline.sameAZGB, latest.sameAZGB)
 		}
-		complete := hasData && !usedFallbackBaseline && !end.After(mostRecentSnapshotTime(snaps))
+		overlapsGap, coveredByGap := gapOverlap(snaps, start, end)
+		if coveredByGap {
+			// The collector was down for this whole bucket: unknown, not $0.
+			hasData, costDelta, gbDelta, sameDelta = false, 0, 0, 0
+		}
+		complete := hasData && !usedFallbackBaseline && !overlapsGap && !end.After(mostRecentSnapshotTime(snaps))
 		buckets = append(buckets, Bucket{
 			Start: start, End: end,
 			CrossAZCostUSD: costDelta, CrossAZGB: gbDelta, SameAZGB: sameDelta,
@@ -343,8 +373,28 @@ func mostRecentSnapshotTime(snaps []snapshot) time.Time {
 // distinct from Store.StartedAt (which never gets evicted) so a caller asking for a 7-day range
 // on a collector that's only been up for 2 hours gets an honest "history starts at X" answer.
 func (h *History) EarliestSnapshot() time.Time {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	if len(h.snaps) == 0 {
 		return time.Time{}
 	}
 	return h.snaps[0].at
+}
+
+// gapOverlap reports whether [a, b] overlaps any unobserved interval (between a gap-marked
+// snapshot and the one before it), and whether one such interval covers [a, b] entirely.
+func gapOverlap(snaps []snapshot, a, b time.Time) (overlaps, covers bool) {
+	for i := 1; i < len(snaps); i++ {
+		if !snaps[i].afterGap {
+			continue
+		}
+		gs, ge := snaps[i-1].at, snaps[i].at
+		if gs.Before(b) && ge.After(a) {
+			overlaps = true
+			if !gs.After(a) && !ge.Before(b) {
+				covers = true
+			}
+		}
+	}
+	return overlaps, covers
 }
