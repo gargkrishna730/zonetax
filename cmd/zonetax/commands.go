@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -302,13 +303,20 @@ func fmtGB(gb float64) string {
 		return fmt.Sprintf("%.0f GB", gb)
 	case gb >= 1:
 		return fmt.Sprintf("%.2f GB", gb)
-	default:
+	case gb*1024 >= 0.1:
 		return fmt.Sprintf("%.1f MB", gb*1024)
+	case gb > 0:
+		return fmt.Sprintf("%.0f KB", math.Max(1, gb*1024*1024))
+	default:
+		return "0 MB"
 	}
 }
 
 func fmtUSD(v float64) string {
-	if v != 0 && v < 0.01 {
+	switch {
+	case v > 0 && v < 0.0001:
+		return "<$0.0001"
+	case v > 0 && v < 0.01:
 		return fmt.Sprintf("$%.4f", v)
 	}
 	return fmt.Sprintf("$%.2f", v)

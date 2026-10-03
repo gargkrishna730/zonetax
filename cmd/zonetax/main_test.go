@@ -137,3 +137,16 @@ func TestEnvURL(t *testing.T) {
 		t.Fatalf("ZONETAX_URL not honored: %s", errs)
 	}
 }
+
+func TestFormatting(t *testing.T) {
+	cases := map[string]string{
+		fmtGB(250): "250 GB", fmtGB(1.5): "1.50 GB", fmtGB(0.5): "512.0 MB",
+		fmtGB(0.00002): "21 KB", fmtGB(0): "0 MB",
+		fmtUSD(1.234): "$1.23", fmtUSD(0.0021): "$0.0021", fmtUSD(0.00001): "<$0.0001", fmtUSD(0): "$0.00",
+	}
+	for got, want := range cases {
+		if got != want {
+			t.Errorf("got %q want %q", got, want)
+		}
+	}
+}
