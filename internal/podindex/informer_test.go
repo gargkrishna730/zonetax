@@ -59,3 +59,33 @@ func TestNewInformerStore_SyncsPodsAndNodes(t *testing.T) {
 		t.Errorf("Len() = %d, %d, want 1, 1", pods, nodes)
 	}
 }
+
+func TestNewInformerStore_HostNetworkPodsResolveToNode(t *testing.T) {
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-1", Labels: map[string]string{azmap.ZoneLabel: "us-east-1a"}},
+		Status:     corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "10.0.0.9"}}},
+	}
+	daemon := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "kube-proxy-x", Namespace: "kube-system"},
+		Spec:       corev1.PodSpec{NodeName: "node-1", HostNetwork: true},
+		Status:     corev1.PodStatus{PodIP: "10.0.0.9"},
+	}
+	clientset := fake.NewSimpleClientset(node, daemon)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	store, err := NewInformerStore(ctx, clientset, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, n, ok := store.Lookup("10.0.0.9")
+	if !ok || p.Workload != "node:node-1" || n.Zone != "us-east-1a" {
+		t.Fatalf("node IP should resolve to the node, got %+v %+v ok=%v", p, n, ok)
+	}
+	if err := clientset.CoreV1().Pods("kube-system").Delete(ctx, "kube-proxy-x", metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if _, _, ok := store.Lookup("10.0.0.9"); !ok {
+		t.Fatal("deleting a hostNetwork pod must not remove the node IP entry")
+	}
+}

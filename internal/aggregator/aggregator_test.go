@@ -42,7 +42,7 @@ func TestAggregate_CrossAZTrafficSummed(t *testing.T) {
 		{OrigSrcIP: "10.0.1.1", OrigDstIP: "10.0.2.1", OrigBytes: 500},
 	}
 
-	out := Aggregate(flows, topo.resolve)
+	out := Aggregate(flows, topo.resolve, "")
 	if len(out.Results) != 1 {
 		t.Fatalf("Aggregate() returned %d results, want 1; got %+v", len(out.Results), out.Results)
 	}
@@ -77,7 +77,7 @@ func TestAggregate_SameAZNotFlaggedCrossAZ(t *testing.T) {
 	}
 	flows := []conntrack.Flow{{OrigSrcIP: "10.0.1.1", OrigDstIP: "10.0.1.2", OrigBytes: 100}}
 
-	out := Aggregate(flows, topo.resolve)
+	out := Aggregate(flows, topo.resolve, "")
 	if len(out.Results) != 1 {
 		t.Fatalf("Aggregate() returned %d results, want 1", len(out.Results))
 	}
@@ -98,7 +98,7 @@ func TestAggregate_UnresolvableIPsSkipped(t *testing.T) {
 	// Destination IP is outside the cluster / not indexed.
 	flows := []conntrack.Flow{{OrigSrcIP: "10.0.1.1", OrigDstIP: "8.8.8.8", OrigBytes: 100}}
 
-	out := Aggregate(flows, topo.resolve)
+	out := Aggregate(flows, topo.resolve, "")
 	if len(out.Results) != 0 {
 		t.Errorf("Aggregate() returned %d results, want 0 (unresolvable dst should be skipped)", len(out.Results))
 	}
@@ -121,8 +121,82 @@ func TestAggregate_FlowWithoutByteAccountingCountsZero(t *testing.T) {
 	// OrigBytes left at zero value (0), simulating no accounting data.
 	flows := []conntrack.Flow{{OrigSrcIP: "10.0.1.1", OrigDstIP: "10.0.2.1", OrigBytes: 0}}
 
-	out := Aggregate(flows, topo.resolve)
-	if len(out.Results) != 1 || out.Results[0].Bytes != 0 {
-		t.Fatalf("Aggregate() = %+v, want 1 result with Bytes=0", out.Results)
+	out := Aggregate(flows, topo.resolve, "")
+	for _, r := range out.Results {
+		if r.Bytes != 0 {
+			t.Fatalf("flow without byte accounting contributed %d bytes", r.Bytes)
+		}
+	}
+	if out.Unresolved != 0 {
+		t.Fatalf("flow should resolve, unresolved=%d", out.Unresolved)
+	}
+}
+
+// Two-node topology used by the attribution tests below.
+func twoNode() fakeTopology {
+	return fakeTopology{
+		pods: map[string]podindex.PodInfo{
+			"10.0.1.1": {Namespace: "app", Workload: "client", NodeName: "node-a"},
+			"10.0.2.1": {Namespace: "app", Workload: "server", NodeName: "node-b"},
+		},
+		node: map[string]azmap.NodeInfo{
+			"node-a": {Name: "node-a", Zone: "az-a"},
+			"node-b": {Name: "node-b", Zone: "az-b"},
+		},
+	}
+}
+
+func bytesFor(out AggregateOutput, src, dst string) int64 {
+	var n int64
+	for _, r := range out.Results {
+		if r.SrcWorkload == src && r.DstWorkload == dst {
+			n += r.Bytes
+		}
+	}
+	return n
+}
+
+// QA found 1 GiB uploaded cross-AZ reported as 2.16 GB: the connection is in both nodes'
+// conntrack tables and both agents counted it. Only the source pod's node may count it.
+func TestAggregate_EachConnectionCountedOnceAcrossNodes(t *testing.T) {
+	topo := twoNode()
+	flow := []conntrack.Flow{{OrigSrcIP: "10.0.1.1", OrigDstIP: "10.0.2.1", ReplySrcIP: "10.0.2.1", ReplyDstIP: "10.0.1.1", OrigBytes: 1000, ReplyBytes: 50}}
+	a := Aggregate(flow, topo.resolve, "node-a")
+	b := Aggregate(flow, topo.resolve, "node-b")
+	if got := bytesFor(a, "client", "server") + bytesFor(b, "client", "server"); got != 1000 {
+		t.Errorf("cluster-wide client->server = %d, want 1000 (counted once)", got)
+	}
+	if len(b.Results) != 0 {
+		t.Errorf("destination node must not count the connection, got %+v", b.Results)
+	}
+}
+
+// QA found a 1 GiB download (server streams to client) reported as 0.003 GB: reply bytes
+// were ignored. They must be attributed server -> client.
+func TestAggregate_ReplyBytesCountedInReverseDirection(t *testing.T) {
+	topo := twoNode()
+	flow := []conntrack.Flow{{OrigSrcIP: "10.0.1.1", OrigDstIP: "10.0.2.1", ReplySrcIP: "10.0.2.1", ReplyDstIP: "10.0.1.1", OrigBytes: 200, ReplyBytes: 5000}}
+	out := Aggregate(flow, topo.resolve, "node-a")
+	if got := bytesFor(out, "server", "client"); got != 5000 {
+		t.Errorf("server->client = %d, want 5000", got)
+	}
+	for _, r := range out.Results {
+		if r.SrcWorkload == "server" && (r.SrcZone != "az-b" || r.DstZone != "az-a") {
+			t.Errorf("reply zones = %s->%s, want az-b->az-a", r.SrcZone, r.DstZone)
+		}
+	}
+}
+
+// Traffic to a ClusterIP Service: on the source node the original destination is the virtual
+// Service IP, and only the reply tuple carries the backend pod IP.
+func TestAggregate_ServiceTrafficResolvedViaReplyTuple(t *testing.T) {
+	topo := twoNode()
+	flow := []conntrack.Flow{{OrigSrcIP: "10.0.1.1", OrigDstIP: "172.20.0.10", ReplySrcIP: "10.0.2.1", ReplyDstIP: "10.0.1.1", OrigBytes: 700, ReplyBytes: 30}}
+	out := Aggregate(flow, topo.resolve, "node-a")
+	if out.Unresolved != 0 {
+		t.Fatalf("service flow should resolve via reply tuple, unresolved=%d", out.Unresolved)
+	}
+	if got := bytesFor(out, "client", "server"); got != 700 {
+		t.Errorf("client->server via service = %d, want 700", got)
 	}
 }

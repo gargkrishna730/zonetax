@@ -62,7 +62,8 @@ func NewInformerStore(ctx context.Context, clientset kubernetes.Interface, resyn
 		AddFunc:    func(obj interface{}) { upsertPod(store, obj) },
 		UpdateFunc: func(_, obj interface{}) { upsertPod(store, obj) },
 		DeleteFunc: func(obj interface{}) {
-			if pod := asPod(obj); pod != nil && pod.Status.PodIP != "" {
+			// hostNetwork pods were never indexed; deleting by their IP would remove the node entry.
+			if pod := asPod(obj); pod != nil && pod.Status.PodIP != "" && !pod.Spec.HostNetwork {
 				store.DeletePodByIP(pod.Status.PodIP)
 			}
 		},
@@ -88,11 +89,24 @@ func upsertNode(store *Store, obj interface{}) {
 		Zone:   node.Labels[azmap.ZoneLabel],
 		Region: node.Labels[azmap.RegionLabel],
 	})
+	// Traffic to/from a node IP (hostNetwork pods, kubelet, NodePort) is attributed to the node.
+	for _, a := range node.Status.Addresses {
+		if a.Type == corev1.NodeInternalIP && a.Address != "" {
+			store.UpsertPod(a.Address, PodInfo{Namespace: "node", Name: node.Name, Workload: "node:" + node.Name, NodeName: node.Name})
+		}
+	}
 }
 
 func upsertPod(store *Store, obj interface{}) {
 	pod := asPod(obj)
 	if pod == nil || pod.Status.PodIP == "" || pod.Spec.NodeName == "" {
+		return
+	}
+	// hostNetwork pods share their node's IP with every other hostNetwork pod on that node
+	// (kube-proxy, CNI, log agents, ZoneTax's own agent). Indexing them would make the node IP
+	// resolve to whichever of those pods was seen last, attributing all node-IP traffic to an
+	// arbitrary daemon. Node IPs are resolved to the node instead (see upsertNode).
+	if pod.Spec.HostNetwork {
 		return
 	}
 	store.UpsertPod(pod.Status.PodIP, PodInfo{

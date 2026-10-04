@@ -125,3 +125,17 @@ func TestApplyFlowDeltas_FlowsWithoutByteAccountingPassThroughUnchanged(t *testi
 		t.Errorf("OrigBytes = %d, want -1 (unchanged passthrough, no accounting data to diff)", out[0].OrigBytes)
 	}
 }
+
+func TestApplyFlowDeltas_ReplyBytesAreDeltaedToo(t *testing.T) {
+	tr := New()
+	f := conntrack.Flow{Protocol: "tcp", OrigSrcIP: "a", OrigDstIP: "b", OrigSrcPort: 1, OrigDstPort: 2, OrigBytes: 100, ReplyBytes: 1000}
+	out := tr.ApplyFlowDeltas([]conntrack.Flow{f})
+	if out[0].OrigBytes != 100 || out[0].ReplyBytes != 1000 {
+		t.Fatalf("first sample: %+v", out[0])
+	}
+	f.OrigBytes, f.ReplyBytes = 150, 4000
+	out = tr.ApplyFlowDeltas([]conntrack.Flow{f})
+	if out[0].OrigBytes != 50 || out[0].ReplyBytes != 3000 {
+		t.Fatalf("second sample deltas: orig=%d reply=%d, want 50/3000", out[0].OrigBytes, out[0].ReplyBytes)
+	}
+}

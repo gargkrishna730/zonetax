@@ -13,21 +13,18 @@ import (
 // *podindex.Store.Lookup directly or a lightweight test fake with no adapter boilerplate.
 type ResolveFunc func(ip string) (podindex.PodInfo, azmap.NodeInfo, bool)
 
-// Key identifies one aggregation bucket: traffic from one AZ to another, broken down by the
-// source namespace/workload responsible for it and the destination namespace/workload it went
-// to. Same-AZ traffic (SrcZone == DstZone) is also tracked so totals/ratios can be reported, but
-// only cross-AZ buckets are billed.
+// Key identifies one aggregation bucket: bytes sent from a pod in SrcZone to a pod in DstZone,
+// broken down by sending and receiving workload. "Src" is always the SENDER of the bytes, which
+// for the reply half of a connection is the connection's destination (e.g. a server streaming
+// a download back to a client). Same-AZ traffic (SrcZone == DstZone) is tracked for ratios but
+// not billed.
 type Key struct {
 	SrcZone      string
 	DstZone      string
 	SrcNamespace string
 	SrcWorkload  string
-	// DstNamespace/DstWorkload identify the destination pod's owning workload (falling back to
-	// the pod name for bare/unowned pods — see podindex.PodInfo.Workload), enabling a
-	// workload-to-workload flow view in addition to the zone-to-zone one. Pod names themselves
-	// are intentionally NOT tracked here: pods are ephemeral (rescheduled, restarted) and would
-	// churn the aggregation key constantly, fragmenting cost attribution across pod generations
-	// instead of the stable owning workload.
+	// DstNamespace/DstWorkload identify the receiving pod's owning workload. Pod names are not
+	// tracked: pods are ephemeral and would fragment attribution across pod generations.
 	DstNamespace string
 	DstWorkload  string
 }
@@ -50,40 +47,60 @@ type AggregateOutput struct {
 	Unresolved int
 }
 
-// Aggregate resolves each flow's source/destination IP to pod+AZ info via resolve, and sums
-// bytes transferred per Key. Flows whose source or destination IP can't be resolved to a known
-// pod (e.g. traffic to/from outside the cluster, or a pod not yet indexed) are skipped — this
-// tool intentionally only attributes intra-cluster, pod-to-pod traffic.
+// Aggregate attributes the bytes in each conntrack flow to the workloads and AZs at both ends.
 //
-// Byte accounting uses OrigBytes when present (kernel conntrack accounting enabled), and treats
-// a flow with no accounting data (HasByteAccounting() == false) as contributing 0 bytes rather
-// than being dropped, so it still counts toward connection visibility in future milestones.
-func Aggregate(flows []conntrack.Flow, resolve ResolveFunc) AggregateOutput {
+// Both directions of a connection are counted: OrigBytes as sent by the connection's source,
+// ReplyBytes as sent by its destination. A download (client connects, server streams data back)
+// is real cross-AZ traffic and was previously invisible because only OrigBytes was read.
+//
+// localNode, when non-empty, is the node this agent runs on. A cross-node connection appears in
+// the conntrack tables of BOTH nodes, so if every agent counted every flow the collector (which
+// sums all agents) would report each connection twice. Each agent therefore only counts a flow
+// when the connection's source pod (the side that opened it) is on its own node, so every
+// connection is counted exactly once cluster-wide. Pass "" to count everything (tests, or a
+// single-node view).
+//
+// Flows whose endpoints can't be resolved to a known pod (traffic to/from outside the cluster,
+// or a pod not yet indexed) are skipped: ZoneTax only attributes intra-cluster pod traffic.
+func Aggregate(flows []conntrack.Flow, resolve ResolveFunc, localNode string) AggregateOutput {
 	totals := make(map[Key]int64)
 	unresolved := 0
 
 	for _, f := range flows {
 		srcPod, srcNode, srcOK := resolve(f.OrigSrcIP)
-		dstPod, dstNode, dstOK := resolve(f.OrigDstIP)
+		// The real responder is the reply tuple's source. For a connection to a ClusterIP
+		// Service, OrigDstIP is the virtual Service IP (DNAT happens on the source node) and only
+		// ReplySrcIP holds the backend pod's IP. For direct pod-to-pod traffic they are equal.
+		dstIP := f.ReplySrcIP
+		if dstIP == "" {
+			dstIP = f.OrigDstIP
+		}
+		dstPod, dstNode, dstOK := resolve(dstIP)
+		if !dstOK && dstIP != f.OrigDstIP {
+			dstPod, dstNode, dstOK = resolve(f.OrigDstIP)
+		}
 		if !srcOK || !dstOK {
 			unresolved++
 			continue
 		}
+		if localNode != "" && srcPod.NodeName != localNode {
+			continue // the agent on the source pod's node owns this connection
+		}
 
-		var bytes int64
 		if f.OrigBytes > 0 {
-			bytes = f.OrigBytes
+			totals[Key{
+				SrcZone: srcNode.Zone, DstZone: dstNode.Zone,
+				SrcNamespace: srcPod.Namespace, SrcWorkload: srcPod.Workload,
+				DstNamespace: dstPod.Namespace, DstWorkload: dstPod.Workload,
+			}] += f.OrigBytes
 		}
-
-		key := Key{
-			SrcZone:      srcNode.Zone,
-			DstZone:      dstNode.Zone,
-			SrcNamespace: srcPod.Namespace,
-			SrcWorkload:  srcPod.Workload,
-			DstNamespace: dstPod.Namespace,
-			DstWorkload:  dstPod.Workload,
+		if f.ReplyBytes > 0 {
+			totals[Key{
+				SrcZone: dstNode.Zone, DstZone: srcNode.Zone,
+				SrcNamespace: dstPod.Namespace, SrcWorkload: dstPod.Workload,
+				DstNamespace: srcPod.Namespace, DstWorkload: srcPod.Workload,
+			}] += f.ReplyBytes
 		}
-		totals[key] += bytes
 	}
 
 	results := make([]Result, 0, len(totals))

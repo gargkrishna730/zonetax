@@ -62,7 +62,7 @@ func main() {
 		log.Fatalf("failed to build pod/node index: %v", err)
 	}
 
-	go runSampleLoop(ctx, store, sampleInterval)
+	go runSampleLoop(ctx, store, sampleInterval, nodeName)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -111,7 +111,7 @@ func buildPodIndex(ctx context.Context) (*podindex.Store, error) {
 // (see deltatrack's package doc for why this is required at all: conntrack's byte counters are
 // cumulative-per-connection, not per-sample, and directly Add()-ing them double/triple/N-counts
 // any connection that outlives one sample interval).
-func runSampleLoop(ctx context.Context, store *podindex.Store, interval time.Duration) {
+func runSampleLoop(ctx context.Context, store *podindex.Store, interval time.Duration, localNode string) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -121,14 +121,14 @@ func runSampleLoop(ctx context.Context, store *podindex.Store, interval time.Dur
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := sampleOnce(store, tracker); err != nil {
+			if err := sampleOnce(store, tracker, localNode); err != nil {
 				log.Printf("sample error: %v", err)
 			}
 		}
 	}
 }
 
-func sampleOnce(store *podindex.Store, tracker *deltatrack.Tracker) error {
+func sampleOnce(store *podindex.Store, tracker *deltatrack.Tracker, localNode string) error {
 	timer := prometheus.NewTimer(metrics.SampleDurationSeconds)
 	defer timer.ObserveDuration()
 
@@ -147,7 +147,7 @@ func sampleOnce(store *podindex.Store, tracker *deltatrack.Tracker) error {
 	// sampling history and must receive true per-interval deltas to report accurate cost.
 	flows = tracker.ApplyFlowDeltas(flows)
 
-	out := aggregator.Aggregate(flows, store.Lookup)
+	out := aggregator.Aggregate(flows, store.Lookup, localNode)
 	if out.Unresolved > 0 {
 		metrics.UnresolvedFlowsTotal.Add(float64(out.Unresolved))
 	}

@@ -25,6 +25,8 @@ type Key struct {
 	SrcPort  int
 	DstIP    string
 	DstPort  int
+	// Reply distinguishes the reply-direction counter of the same connection.
+	Reply bool
 }
 
 func keyOf(f conntrack.Flow) Key {
@@ -100,6 +102,14 @@ func (t *Tracker) ApplyFlowDeltas(flows []conntrack.Flow) []conntrack.Flow {
 		k := keyOf(f)
 		seen[k] = true
 		out[i].OrigBytes = t.Delta(k, f.OrigBytes)
+		// Reply direction (destination -> source) is tracked under a separate key so the
+		// download half of a connection is delta'd the same way as the upload half.
+		if f.ReplyBytes >= 0 {
+			rk := k
+			rk.Reply = true
+			seen[rk] = true
+			out[i].ReplyBytes = t.Delta(rk, f.ReplyBytes)
+		}
 	}
 	t.Prune(seen)
 	return out
