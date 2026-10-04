@@ -7,6 +7,10 @@ metadata:
     {{- include "zonetax.labels" . | nindent 4 }}
     app.kubernetes.io/component: agent
 spec:
+  {{- with .Values.agent.updateStrategy }}
+  updateStrategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "zonetax.selectorLabels" . | nindent 6 }}
@@ -19,6 +23,9 @@ spec:
     spec:
       serviceAccountName: {{ include "zonetax.serviceAccountName" . }}
       hostNetwork: true
+      {{- with .Values.agent.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
       tolerations:
         - operator: Exists
       {{- if .Values.agent.enableConntrackAcct }}

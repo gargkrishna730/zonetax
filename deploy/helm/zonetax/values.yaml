@@ -18,6 +18,15 @@ agent:
     limits:
       cpu: 200m
       memory: 128Mi
+  # The agent must run on every node or that node's traffic is not measured. On a node with no
+  # free memory the pod stays Pending forever. Set a priority class so the scheduler can make
+  # room, e.g. "system-node-critical" (built in) or your own class.
+  priorityClassName: ""
+  # maxUnavailable > 1 (or a percentage) keeps rollouts moving when one node can't schedule.
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
 
 collector:
   image:

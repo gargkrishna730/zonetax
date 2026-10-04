@@ -79,6 +79,10 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: agent
 spec:
+  updateStrategy:
+    rollingUpdate:
+      maxUnavailable: 25%
+    type: RollingUpdate
   selector:
     matchLabels:
       app.kubernetes.io/name: zonetax
