@@ -546,7 +546,16 @@ export default function App() {
               )}
             </div>
             {mapFullscreen && <div className="backdrop" onClick={() => setMapFullscreen(false)} aria-hidden="true" />}
-            <div className={`canvas${viewMode === 'workload' ? ' tall' : ''}${mapFullscreen ? ' fullscreen' : ''}`} role="region" aria-label="Traffic map. Tab to reach route labels and boxes; Enter opens details.">
+            <div className={`canvas${viewMode === 'workload' ? ' tall' : ''}${mapFullscreen ? ' fullscreen' : ''}`} role="region" aria-label="Traffic map. Tab to reach route labels and boxes; Enter opens details."
+              onKeyDown={(e) => {
+                // ReactFlow wraps each node in a focusable div with its own key handling, so
+                // Enter/Space on a focused node is handled here: toggle focus mode for that node.
+                if (e.key !== 'Enter' && e.key !== ' ') return
+                const id = (e.target as HTMLElement).closest('.react-flow__node')?.getAttribute('data-id')
+                if (!id) return
+                e.preventDefault()
+                setFocusedNodeId((cur) => (cur === id ? null : id))
+              }}>
               {focusedNodeId && (
                 <div className="canvas-chip">
                   <span>Focused: {nodesById.get(focusedNodeId)?.label ?? focusedNodeId}</span>

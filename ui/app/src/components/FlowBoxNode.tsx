@@ -10,8 +10,8 @@ export type FlowBoxNodeData = {
 
 export type FlowBoxNode = Node<FlowBoxNodeData, 'flowBox'>
 
-/** Box node for both map views. Focusable (ReactFlow sets tabindex); Enter/Space toggles focus
- * mode the same as a click. Handles are hidden: edges float to the nearest border. */
+/** Box node for both map views. Focusable (ReactFlow sets tabindex); Enter/Space is handled by the
+ * canvas in App.tsx (ReactFlow's wrapper receives the key event, not this div). Handles are hidden: edges float to the nearest border. */
 export function FlowBoxNode({ data }: NodeProps<FlowBoxNode>) {
   return (
     <div
@@ -19,12 +19,6 @@ export function FlowBoxNode({ data }: NodeProps<FlowBoxNode>) {
       onClick={(e) => {
         e.stopPropagation()
         data.onClick?.()
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          data.onClick?.()
-        }
       }}
     >
       <Handle type="source" position={Position.Top} style={{ visibility: 'hidden', pointerEvents: 'none' }} />
