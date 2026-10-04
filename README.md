@@ -15,14 +15,19 @@ ZoneTax is a lightweight, Kubernetes-native tool that:
 - 🚨 **Alerts** when spend crosses a threshold (Slack webhook)
 - 🖥️ **CLI** for quick `zonetax top` / `zonetax report` checks without opening a dashboard
 
-![ZoneTax Cross-AZ Service Map demo](./docs/assets/zonetax-demo.gif)
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="./docs/assets/dashboard-light.png">
+  <img alt="ZoneTax dashboard: cross-AZ spend, projected daily cost, spend over time and the zone traffic map" src="./docs/assets/dashboard-dark.png">
+</picture>
 
-*Recorded live against a real 3-AZ EKS cluster: time-range picker, filters, route-cost modes, and*
-*the fullscreen traffic map — all real data, not mocked.*
+*Live data from a real 3-AZ EKS cluster. Dark and light themes, colour-blind-safe cost scale,
+fully keyboard accessible (WCAG 2.2 AA, 0 axe violations).*
+
+**Accuracy:** within 4% of the AWS bill over a 23-hour window. See [docs/accuracy.md](./docs/accuracy.md).
 
 ## Status
 
-🚀 [v0.1.0](https://github.com/gargkrishna730/zonetax/releases/tag/v0.1.0) released. Early stage, AWS/EKS only for now. See [ROADMAP.md](./ROADMAP.md).
+🚀 [Latest release](https://github.com/gargkrishna730/zonetax/releases/latest). Early stage, AWS/EKS only for now. See [ROADMAP.md](./ROADMAP.md).
 
 ## Does ZoneTax cost anything to run?
 

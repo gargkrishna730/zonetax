@@ -15,7 +15,9 @@ timeline
   2026-09-06 : Cross-AZ Service Map redesign : /api/v1/map : Filter + incomplete-window bugs fixed
   2026-09-07 : Removed internal names : Cost FAQ in README : Demo GIF
   2026-09-08 : Agreed next plan, Helm repo publish, CLI, raw manifests
+  2026-10-04 : Accuracy vs AWS bill within 4% : UI revamp, accessible colours, light theme : v0.3.0
   2026-10-03 : Moved to Jcode, AGENTS.md + PROGRESS.md : CLI (M5) : Helm repo + raw manifests + release workflow : Collector memory fix
+  2026-10-04 : Accuracy within 4% of AWS bill : UI revamp, light theme, accessibility : v0.3.0
 ```
 
 ## Key decisions
@@ -79,3 +81,15 @@ sessions start with full context. Next: Helm repo publish, then CLI, then genera
 - Follow-up live checks: a window ending between the last periodic save and the pod kill had
   routes (so the shutdown save ran); a window inside history spanning the restart is
   complete=false, while windows entirely before or after it are complete=true.
+
+### 2026-10-04: accuracy check + UI revamp, v0.3.0
+- Accuracy: ZoneTax $2.017/day vs AWS $2.094/day for this cluster's EC2 instances (-3.7%),
+  using Cost Explorer per-resource data (`docs/accuracy.md`). Earlier "4x" came from comparing a
+  10-minute sample against the account-wide total.
+- UI audit before: axe passed, but legend colours did not match the map, red/green scale not
+  colour-blind safe, partial windows painted every edge amber (cost hidden), spend chart hidden,
+  table rows / map not keyboard reachable, no visible focus, sub-cent noise ($0.004897).
+- After: single magma-style cost scale (contrast-tested), dark + light themes, KPI cards with
+  projected per day/month, promoted spend chart, layered workload map, simpler filters, full
+  keyboard support. axe 0 violations dark + light on the deployed build; colour-blindness
+  simulation checked; no horizontal overflow at 390 px.
