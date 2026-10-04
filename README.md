@@ -23,7 +23,7 @@ ZoneTax is a lightweight, Kubernetes-native tool that:
 *Live data from a real 3-AZ EKS cluster. Dark and light themes, colour-blind-safe cost scale,
 fully keyboard accessible (WCAG 2.2 AA, 0 axe violations).*
 
-**Accuracy:** within 4% of the AWS bill over a 23-hour window. See [docs/accuracy.md](./docs/accuracy.md).
+**Accuracy:** controlled tests on a real 3-AZ cluster measure within 1% of the bytes actually sent (upload, download, and through Services). See [docs/accuracy.md](./docs/accuracy.md).
 
 ## Status
 

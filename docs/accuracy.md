@@ -1,9 +1,37 @@
 # Accuracy: ZoneTax vs the AWS bill
 
+> **Correction (2026-10-05, v0.4.0).** End-to-end QA with known traffic found two agent bugs in
+> v0.3.x and earlier: every cross-node connection was counted twice (both nodes' agents counted
+> it), and the download direction of connections was not counted at all. Which connections were
+> affected depended on how they were addressed (direct pod IP traffic was double counted, while
+> traffic through a Service was counted once), so the errors partly offset each other on this
+> cluster. The within-4% comparison below is therefore **not** reliable evidence of accuracy. Fixed in v0.4.0, where controlled tests
+> measure within 1% (see "Controlled test" below). A fresh comparison against the AWS bill on
+> v0.4.0 data replaces the table below once a full day has been collected.
+
+## Controlled test (v0.4.0)
+
+1 GiB (1.0737 GB) sent between two test pods on a real 3-AZ EKS cluster, measured by ZoneTax:
+
+| Test | Reported | Error |
+|---|---|---|
+| Upload, pod in AZ a to pod in AZ c | 1.0814 GB | +0.7% |
+| Download, AZ c streams to AZ a (reply direction) | 1.0780 GB | +0.4% |
+| Upload through a ClusterIP Service | 1.0816 GB | +0.7% |
+| Same-AZ upload (control) | no cross-AZ entry | correct |
+
+The small positive error is TCP/IP header overhead: conntrack counts bytes on the wire, payload
+plus headers, which is also what AWS bills.
+
+The same test on v0.3.1 reported 2.16 GB for the upload (double counted) and 0.003 GB for the
+download (reply direction ignored).
+
+## Earlier comparison (v0.2.0, superseded)
+
 How close is ZoneTax's cross-AZ cost to what AWS actually charges? Measured on a real 3-AZ EKS
 test cluster (us-east-1), October 2026, ZoneTax v0.2.0.
 
-## Result
+### Result (superseded, see correction above)
 
 | | Cross-AZ GB / day | Cost / day |
 |---|---|---|
@@ -11,7 +39,7 @@ test cluster (us-east-1), October 2026, ZoneTax v0.2.0.
 | ZoneTax, 22.9 h continuous window (2026-10-03 18:18 to 10-04 17:10 UTC), scaled to 24 h | 100.8 GB | **$2.017** |
 | Difference | | **-3.7%** |
 
-ZoneTax was **within 4% of the AWS bill**, slightly under.
+On v0.2.0 ZoneTax landed within 4% of the AWS bill, but with the counting bugs described in the correction above, so this match is not reliable.
 
 ## Method
 
