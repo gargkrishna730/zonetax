@@ -15,7 +15,6 @@ timeline
   2026-09-06 : Cross-AZ Service Map redesign : /api/v1/map : Filter + incomplete-window bugs fixed
   2026-09-07 : Removed internal names : Cost FAQ in README : Demo GIF
   2026-09-08 : Agreed next plan, Helm repo publish, CLI, raw manifests
-  2026-10-04 : Accuracy vs AWS bill within 4% : UI revamp, accessible colours, light theme : v0.3.0
   2026-10-03 : Moved to Jcode, AGENTS.md + PROGRESS.md : CLI (M5) : Helm repo + raw manifests + release workflow : Collector memory fix
   2026-10-04 : Accuracy within 4% of AWS bill : UI revamp, light theme, accessibility : v0.3.0
 ```
