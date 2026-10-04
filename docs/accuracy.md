@@ -57,3 +57,18 @@ aws ce get-cost-and-usage-with-resources --time-period Start=2026-10-03,End=2026
 zonetax report --range 24h
 ```
 Note: `get-cost-and-usage-with-resources` only covers the last 14 days.
+
+## Case study: fixing the top cost driver (2026-10-04)
+
+ZoneTax showed one route carrying 97% of the test cluster's cross-AZ spend: a telemetry collector
+in one AZ writing ~4.4 GB/hour into its database in another AZ (the database's EBS volume pins
+it to its zone). The collector is stateless, so it was pinned to the database's zone via its Helm
+values (`nodeSelector: topology.kubernetes.io/zone`). No data migration was needed.
+
+| | Cross-AZ GB/hour | Cost/day |
+|---|---|---|
+| Before (1 h window) | 4.83 | $2.32 |
+| After (first 8 min) | 0.06 | $0.03 |
+
+That route disappeared from the map within one scrape interval. The remaining cross-AZ traffic
+is the apps in other zones sending telemetry to the collector (a few MB/hour).
