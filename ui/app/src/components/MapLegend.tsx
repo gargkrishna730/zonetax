@@ -1,36 +1,31 @@
-export interface MapLegendProps {
-  viewMode: 'zone' | 'workload'
-}
+import { costLegendStops } from '../theme'
 
-/** Static legend explaining the map's visual encoding: arrow direction, color scale, and what
- * line thickness means — previously only a one-line hint existed with no color/thickness key at
- * all. */
-export function MapLegend({ viewMode }: MapLegendProps) {
+/** Map legend generated from the same cost scale the edges use, so it can never drift. */
+export function MapLegend({ viewMode }: { viewMode: 'zone' | 'workload' }) {
   return (
-    <div className="map-legend">
-      <div className="map-legend-row">
-        <span className="legend-arrow">→</span>
-        <span>Arrow points from source {viewMode === 'zone' ? 'zone' : 'workload'} to destination</span>
-      </div>
-      <div className="map-legend-row">
-        <span className="legend-swatches">
-          <i className="legend-swatch" style={{ background: 'rgb(0,104,55)' }} />
-          <i className="legend-swatch" style={{ background: 'rgb(249,247,174)' }} />
-          <i className="legend-swatch" style={{ background: 'rgb(165,0,38)' }} />
+    <div className="legend" aria-label="Map legend">
+      <span className="legend-item">
+        <span aria-hidden="true">→</span> {viewMode === 'zone' ? 'source zone to destination zone' : 'source workload to destination'}
+      </span>
+      <span className="legend-item">
+        <span className="legend-ramp" aria-hidden="true">
+          {costLegendStops().map((c) => (
+            <i key={c} style={{ background: c }} />
+          ))}
         </span>
-        <span>Color: cheap → expensive route (relative to the most expensive route shown)</span>
-      </div>
-      <div className="map-legend-row">
-        <span className="legend-thickness">
-          <i className="legend-line thin" />
-          <i className="legend-line thick" />
+        low to high cost
+      </span>
+      <span className="legend-item">
+        <span className="legend-width" aria-hidden="true">
+          <i style={{ height: 2 }} />
+          <i style={{ height: 6 }} />
         </span>
-        <span>Line thickness: relative traffic volume (GB) on that route</span>
-      </div>
-      <div className="map-legend-row legend-hint">
-        Drag boxes to rearrange · scroll/pinch to zoom · click a route for full breakdown · click a
-        box to focus its routes
-      </div>
+        more traffic
+      </span>
+      <span className="legend-item">
+        <span className="legend-dash" aria-hidden="true" />
+        partial window
+      </span>
     </div>
   )
 }

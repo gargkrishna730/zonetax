@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import type { FilterOption } from '../mapFilters'
 import { searchOptions } from '../mapFilters'
 
@@ -11,55 +11,50 @@ export interface FilterGroupDef {
   onSelectAll: () => void
   onClearGroup: () => void
   searchable: boolean
+  defaultOpen?: boolean
 }
 
-/** One collapsible, independently-scrollable, searchable filter group — checkbox + label +
- * real count per row, a group-local search box for long lists, and Select all / Clear controls.
- * Matches the reference service map's per-group pattern (e.g. "Namespace (8/8)"). */
 function FilterGroup({ group }: { group: FilterGroupDef }) {
-  const [expanded, setExpanded] = useState(true)
+  const [open, setOpen] = useState(group.defaultOpen ?? true)
   const [query, setQuery] = useState('')
+  const bodyId = useId()
   const visible = group.searchable ? searchOptions(group.options, query) : group.options
+  const n = group.selected.size
 
   return (
-    <div className="filter-group">
-      <button type="button" className="filter-group-head" onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}>
-        <span className={`chevron ${expanded ? 'open' : ''}`}>▸</span>
-        <span className="filter-group-title">{group.title}</span>
-        <span className="filter-group-count">
-          {group.selected.size}/{group.options.length}
-        </span>
+    <div className="fgroup">
+      <button type="button" className="fgroup-head" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-controls={bodyId}>
+        <span className="chev" aria-hidden="true">›</span>
+        {group.title}
+        <span className={`count${n ? ' on' : ''}`}>{n ? `${n} selected` : `${group.options.length}`}</span>
       </button>
-      {expanded && (
-        <div className="filter-group-body">
+      {open && (
+        <div className="fgroup-body" id={bodyId}>
           {group.searchable && group.options.length > 6 && (
             <input
-              type="text"
-              className="filter-search"
-              placeholder={`Search ${group.title.toLowerCase()}…`}
+              type="search"
+              className="input input-search"
+              placeholder={`Search ${group.title.toLowerCase()}`}
+              aria-label={`Search ${group.title.toLowerCase()}`}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
           )}
-          <div className="filter-group-actions">
-            <button type="button" onClick={group.onSelectAll}>
-              Select all
-            </button>
-            <button type="button" onClick={group.onClearGroup}>
-              Clear
-            </button>
-          </div>
-          <div className="filter-options-scroll">
+          {group.options.length > 1 && (
+            <div className="fgroup-actions">
+              <button type="button" className="link-btn" onClick={group.onSelectAll}>Select all</button>
+              {n > 0 && <button type="button" className="link-btn" onClick={group.onClearGroup}>Clear</button>}
+            </div>
+          )}
+          <div className="options" role="group" aria-label={group.title}>
             {visible.length === 0 ? (
-              <div className="filter-empty">No matches</div>
+              <div className="option-empty">No matches</div>
             ) : (
               visible.map((opt) => (
-                <label key={opt.value} className="filter-option-row">
+                <label key={opt.value} className="option" title={opt.label}>
                   <input type="checkbox" checked={group.selected.has(opt.value)} onChange={() => group.onToggle(opt.value)} />
-                  <span className="filter-option-label" title={opt.label}>
-                    {opt.label}
-                  </span>
-                  <span className="filter-option-count">{opt.count}</span>
+                  <span className="label">{opt.label}</span>
+                  <span className="cnt" aria-label={`${opt.count} routes`}>{opt.count}</span>
                 </label>
               ))
             )}
@@ -79,43 +74,52 @@ export interface RangeFilterDef {
   onMaxChange: (v: number | null) => void
   unit: string
   step?: number
+  presets?: { label: string; min: number }[]
 }
 
 function RangeFilterGroup({ range }: { range: RangeFilterDef }) {
-  const [expanded, setExpanded] = useState(true)
+  const [open, setOpen] = useState(true)
+  const bodyId = useId()
+  const active = range.min !== null || range.max !== null
+  const parse = (v: string) => (v === '' ? null : Math.max(0, Number(v)))
   return (
-    <div className="filter-group">
-      <button type="button" className="filter-group-head" onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}>
-        <span className={`chevron ${expanded ? 'open' : ''}`}>▸</span>
-        <span className="filter-group-title">{range.title}</span>
-        <span className="filter-group-count">{range.min !== null || range.max !== null ? 'active' : 'any'}</span>
+    <div className="fgroup">
+      <button type="button" className="fgroup-head" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-controls={bodyId}>
+        <span className="chev" aria-hidden="true">›</span>
+        {range.title}
+        <span className={`count${active ? ' on' : ''}`}>{active ? 'active' : 'any'}</span>
       </button>
-      {expanded && (
-        <div className="filter-group-body">
-          <div className="range-inputs">
-            <label>
-              Min
-              <input
-                type="number"
-                min={0}
-                step={range.step ?? 0.01}
-                value={range.min ?? ''}
-                placeholder="any"
-                onChange={(e) => range.onMinChange(e.target.value === '' ? null : Math.max(0, Number(e.target.value)))}
-              />
-              {range.unit}
+      {open && (
+        <div className="fgroup-body" id={bodyId}>
+          {range.presets && (
+            <div className="presets" role="group" aria-label={`${range.title} presets`}>
+              {range.presets.map((pr) => {
+                const on = range.min === pr.min && range.max === null
+                return (
+                  <button
+                    key={pr.label}
+                    type="button"
+                    className="preset"
+                    aria-pressed={on}
+                    onClick={() => {
+                      range.onMinChange(on ? null : pr.min)
+                      range.onMaxChange(null)
+                    }}
+                  >
+                    {pr.label}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          <div className="range-row">
+            <label className="field">
+              Min ({range.unit})
+              <input className="input" type="number" inputMode="decimal" min={0} step={range.step ?? 0.01} value={range.min ?? ''} placeholder="any" onChange={(e) => range.onMinChange(parse(e.target.value))} />
             </label>
-            <label>
-              Max
-              <input
-                type="number"
-                min={0}
-                step={range.step ?? 0.01}
-                value={range.max ?? ''}
-                placeholder="any"
-                onChange={(e) => range.onMaxChange(e.target.value === '' ? null : Math.max(0, Number(e.target.value)))}
-              />
-              {range.unit}
+            <label className="field">
+              Max ({range.unit})
+              <input className="input" type="number" inputMode="decimal" min={0} step={range.step ?? 0.01} value={range.max ?? ''} placeholder="any" onChange={(e) => range.onMaxChange(parse(e.target.value))} />
             </label>
           </div>
         </div>
@@ -132,6 +136,7 @@ export interface ActiveChip {
 
 export interface FilterPanelProps {
   groups: FilterGroupDef[]
+  advancedGroups: FilterGroupDef[]
   ranges: RangeFilterDef[]
   activeChips: ActiveChip[]
   onResetAll: () => void
@@ -139,70 +144,67 @@ export interface FilterPanelProps {
   onMaxConnectionsChange: (n: number) => void
   hiddenRouteCount: number
   totalRouteCount: number
+  onClose: () => void
 }
 
-/** The left filter panel: fixed width, independently scrollable from the main content, every
- * group collapsible/searchable with real counts, active-filter chips, and the Max-connections
- * control with an honest "N of M routes shown" explanation of what's aggregated/hidden. */
-export function FilterPanel({
-  groups,
-  ranges,
-  activeChips,
-  onResetAll,
-  maxConnections,
-  onMaxConnectionsChange,
-  hiddenRouteCount,
-  totalRouteCount,
-}: FilterPanelProps) {
+/** Left filter sidebar. Primary filters (zone, namespace, workload, cost) are always visible;
+ * direction-specific and route filters live under "More filters" to keep the panel calm. */
+export function FilterPanel(p: FilterPanelProps) {
+  const [showAdvanced, setShowAdvanced] = useState(false)
   return (
-    <aside className="filter-panel">
-      <div className="filter-panel-head">
+    <aside className="filters" id="filters" aria-label="Filters">
+      <div className="filters-head">
         <h2>Filters</h2>
-        {activeChips.length > 0 && (
-          <button type="button" className="reset-all-btn" onClick={onResetAll}>
-            Reset
-          </button>
+        {p.activeChips.length > 0 && (
+          <button type="button" className="link-btn" onClick={p.onResetAll}>Reset all</button>
         )}
+        <button type="button" className="btn btn-ghost btn-icon" onClick={p.onClose} aria-label="Close filters">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+        </button>
       </div>
 
-      {activeChips.length > 0 && (
-        <div className="active-chips">
-          {activeChips.map((chip) => (
-            <span key={chip.key} className="active-chip">
-              {chip.label}
-              <button type="button" onClick={chip.onRemove} aria-label={`Remove filter ${chip.label}`}>
-                ×
-              </button>
-            </span>
+      {p.activeChips.length > 0 && (
+        <ul className="chips" aria-label="Active filters" style={{ listStyle: 'none', margin: 0 }}>
+          {p.activeChips.map((chip) => (
+            <li key={chip.key} className="filter-chip">
+              <span title={chip.label}>{chip.label}</span>
+              <button type="button" onClick={chip.onRemove} aria-label={`Remove filter ${chip.label}`}>×</button>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
 
-      <div className="filter-panel-scroll">
-        {groups.map((g) => (
+      <div className="filters-scroll">
+        {p.groups.map((g) => (
           <FilterGroup key={g.key} group={g} />
         ))}
-        {ranges.map((r) => (
+        {p.ranges.map((r) => (
           <RangeFilterGroup key={r.key} range={r} />
         ))}
+        <div className="fgroup">
+          <button type="button" className="fgroup-head" onClick={() => setShowAdvanced((v) => !v)} aria-expanded={showAdvanced}>
+            <span className="chev" aria-hidden="true">›</span>
+            More filters
+            <span className="count">source, destination, route</span>
+          </button>
+        </div>
+        {showAdvanced && p.advancedGroups.map((g) => <FilterGroup key={g.key} group={{ ...g, defaultOpen: g.selected.size > 0 }} />)}
       </div>
 
-      <div className="max-connections-control">
-        <label>
-          Max connections
-          <select value={maxConnections} onChange={(e) => onMaxConnectionsChange(Number(e.target.value))}>
+      <div className="filters-foot">
+        <label className="field">
+          Max routes on map
+          <select className="select" value={p.maxConnections} onChange={(e) => p.onMaxConnectionsChange(Number(e.target.value))}>
             {[10, 25, 50, 100, 250].map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
+              <option key={n} value={n}>{n}</option>
             ))}
             <option value={Infinity}>No limit</option>
           </select>
         </label>
-        <div className="max-connections-hint">
-          {hiddenRouteCount > 0
-            ? `Showing the top ${totalRouteCount - hiddenRouteCount} of ${totalRouteCount} routes by the active sort — raise this limit to see the rest. No route is hidden below a cost/traffic threshold.`
-            : `Showing all ${totalRouteCount} route${totalRouteCount === 1 ? '' : 's'} — none hidden.`}
+        <div className="hint" role="status">
+          {p.hiddenRouteCount > 0
+            ? `Showing top ${p.totalRouteCount - p.hiddenRouteCount} of ${p.totalRouteCount} routes. Raise the limit to see the rest.`
+            : `All ${p.totalRouteCount} route${p.totalRouteCount === 1 ? '' : 's'} shown.`}
         </div>
       </div>
     </aside>

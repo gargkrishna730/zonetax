@@ -61,8 +61,11 @@ describe('fmtDuration', () => {
 })
 
 describe('existing formatters still behave (regression guard)', () => {
-  it('fmtUSD formats sub-cent values with extra precision', () => {
-    expect(fmtUSD(0.0001234)).toBe('$0.000123')
+  it('fmtUSD formats sub-cent values with 2 significant digits', () => {
+    expect(fmtUSD(0.0001234)).toBe('$0.00012')
+    expect(fmtUSD(0.004897)).toBe('$0.0049')
+    expect(fmtUSD(0.00001)).toBe('<$0.0001')
+    expect(fmtUSD(1.8612)).toBe('$1.86')
   })
   it('fmtGB formats sub-MB values in MB', () => {
     expect(fmtGB(0.0001)).toContain('MB')

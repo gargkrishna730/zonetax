@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import type { MapEntry } from '../types'
 import { fmtExact, fmtGB, fmtUSD } from '../format'
 
@@ -11,74 +12,36 @@ export interface RouteDetailsPanelProps {
   onClose: () => void
 }
 
-/** Route details panel shown on selecting an edge/route: every field the brief requires
- * (source/destination workload+namespace+AZ, traffic, cross-AZ traffic, price/GB, estimated
- * cost, % of total spend, time window, collection timestamp) — reusing the existing
- * price_per_gb_usd from the API response rather than recomputing a rate in the UI. */
+/** Details for one workload-to-workload route. Uses the API's price, never recomputes billing. */
 export function RouteDetailsPanel({ entry, totalCrossAZCostUSD, pricePerGBUSD, rangeStartUTC, rangeEndUTC, serverTimeUTC, onClose }: RouteDetailsPanelProps) {
-  const pctOfTotal = totalCrossAZCostUSD > 0 ? (100 * entry.cost_usd) / totalCrossAZCostUSD : null
+  const pct = totalCrossAZCostUSD > 0 ? (100 * entry.cost_usd) / totalCrossAZCostUSD : null
+  const closeRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    closeRef.current?.focus()
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
   return (
-    <div className="route-details-panel" role="dialog" aria-label="Route details">
-      <div className="route-details-head">
-        <h3>
-          {entry.src_zone} → {entry.dst_zone}
-        </h3>
-        <button type="button" onClick={onClose} aria-label="Close route details">
-          ×
-        </button>
+    <section className="panel" role="dialog" aria-modal="false" aria-labelledby="rd-title" style={{ bottom: 'auto', maxHeight: 'calc(100% - 24px)' }}>
+      <div className="panel-head">
+        <div>
+          <h3 id="rd-title">{entry.src_workload} → {entry.dst_workload}</h3>
+          <div className="panel-sub">{entry.src_zone} → {entry.dst_zone}</div>
+        </div>
+        <button ref={closeRef} type="button" className="btn btn-ghost btn-icon close" onClick={onClose} aria-label="Close route details">✕</button>
       </div>
-      <div className="route-details-grid">
-        <div>
-          <span className="rd-k">Source workload</span>
-          <span className="rd-v">
-            {entry.src_workload} <span className="rd-ns">({entry.src_namespace})</span>
-          </span>
-        </div>
-        <div>
-          <span className="rd-k">Destination workload</span>
-          <span className="rd-v">
-            {entry.dst_workload} <span className="rd-ns">({entry.dst_namespace})</span>
-          </span>
-        </div>
-        <div>
-          <span className="rd-k">Source AZ</span>
-          <span className="rd-v">{entry.src_zone}</span>
-        </div>
-        <div>
-          <span className="rd-k">Destination AZ</span>
-          <span className="rd-v">{entry.dst_zone}</span>
-        </div>
-        <div>
-          <span className="rd-k">Traffic</span>
-          <span className="rd-v">{fmtGB(entry.gb)}</span>
-        </div>
-        <div>
-          <span className="rd-k">Cross-AZ traffic</span>
-          <span className="rd-v">{fmtGB(entry.gb)} (100% — this route is by definition cross-AZ)</span>
-        </div>
-        <div>
-          <span className="rd-k">Price / GB</span>
-          <span className="rd-v">{fmtUSD(pricePerGBUSD)}/GB</span>
-        </div>
-        <div>
-          <span className="rd-k">Estimated route cost</span>
-          <span className="rd-v cost">{fmtUSD(entry.cost_usd)}</span>
-        </div>
-        <div>
-          <span className="rd-k">% of total cross-AZ spend</span>
-          <span className="rd-v">{pctOfTotal !== null ? pctOfTotal.toFixed(1) + '%' : '—'}</span>
-        </div>
-        <div className="rd-wide">
-          <span className="rd-k">Time window</span>
-          <span className="rd-v">
-            {fmtExact(rangeStartUTC)} → {fmtExact(rangeEndUTC)}
-          </span>
-        </div>
-        <div className="rd-wide">
-          <span className="rd-k">Collection timestamp</span>
-          <span className="rd-v">{fmtExact(serverTimeUTC)}</span>
-        </div>
-      </div>
-    </div>
+      <dl className="kv">
+        <div><dt>Cost</dt><dd className="num">{fmtUSD(entry.cost_usd)}</dd></div>
+        <div><dt>Share of spend</dt><dd className="num">{pct !== null ? pct.toFixed(1) + '%' : '—'}</dd></div>
+        <div><dt>Traffic</dt><dd className="num">{fmtGB(entry.gb)}</dd></div>
+        <div><dt>Price</dt><dd className="num">{fmtUSD(pricePerGBUSD)}/GB <small>(both directions)</small></dd></div>
+        <div><dt>Source</dt><dd>{entry.src_workload}<br /><small>{entry.src_namespace} · {entry.src_zone}</small></dd></div>
+        <div><dt>Destination</dt><dd>{entry.dst_workload}<br /><small>{entry.dst_namespace} · {entry.dst_zone}</small></dd></div>
+        <div className="wide"><dt>Window</dt><dd>{fmtExact(rangeStartUTC)} – {fmtExact(rangeEndUTC)}</dd></div>
+        <div className="wide"><dt>Collected</dt><dd>{fmtExact(serverTimeUTC)}</dd></div>
+      </dl>
+    </section>
   )
 }

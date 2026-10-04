@@ -1,12 +1,5 @@
 import { useCallback, useState } from 'react'
-import {
-  BaseEdge,
-  EdgeLabelRenderer,
-  getBezierPath,
-  useInternalNode,
-  type EdgeProps,
-  type Edge,
-} from '@xyflow/react'
+import { BaseEdge, EdgeLabelRenderer, getBezierPath, useInternalNode, useStore, type EdgeProps, type Edge } from '@xyflow/react'
 import { getFloatingEdgeParams } from '../floatingEdgeUtils'
 import { fmtGB, fmtUSD, fmtUSDShort } from '../format'
 import type { FlowPair } from '../flowGraph'
@@ -16,123 +9,101 @@ export type FlowGraphEdgeData = {
   pair: FlowPair
   color: string
   widthPx: number
-  /** "Route" for the zone view (labels a workload breakdown), "Zone route" for the workload
-   * view (labels a zone-pair breakdown) — keeps the hover tooltip's terminology correct for
-   * whichever view is active instead of always saying one or the other. */
   breakdownHeading: string
-  /** Opens the persistent drill-down panel for this edge — a hover tooltip alone can't hold a
-   * full, sortable, click-through-able list, and caps at "top 5" which isn't enough for a real
-   * investigation. Undefined when there's nothing further to drill into (e.g. already at the
-   * most granular workload-to-workload view). */
   onSelect?: () => void
-  /** True when a node-focus filter is active and this edge does NOT touch the focused node —
-   * rendered faded so the focused node's actual inbound/outbound routes stand out clearly. */
   dimmed?: boolean
+  partial?: boolean
+  selected?: boolean
+  /** Many-route views: label only routes that matter; the rest show a small dot (still a
+   * focusable button with full details on hover/focus). */
+  compact?: boolean
 }
 
 export type FlowGraphEdge = Edge<FlowGraphEdgeData, 'flowGraph'>
 
-/** A "floating" edge (attaches to whichever side of each box currently faces the other node,
- * recomputed live as nodes are dragged — see floatingEdgeUtils.ts) drawn as a curved bezier with
- * an arrowhead, a $-cost pill at its midpoint, and a hover tooltip breaking the route down by
- * contributing sub-item (workload for the zone view, zone-route for the workload view). Shared
- * by both views so drag/zoom/tooltip behavior can't drift between them. */
+/** Floating bezier edge. Cost is encoded three ways (colour, width, label) so colour is never the
+ * only cue. Partial windows draw dashed; a selected route gets a focus-coloured halo. The pill is
+ * a real button so it is reachable by keyboard; its hover details also show on focus. */
 export function FlowGraphEdge({ id, source, target, data, markerEnd }: EdgeProps<FlowGraphEdge>) {
   const sourceNode = useInternalNode<FlowBoxNode>(source)
   const targetNode = useInternalNode<FlowBoxNode>(target)
   const [hovered, setHovered] = useState(false)
-
-  const showTooltip = useCallback(() => setHovered(true), [])
-  const hideTooltip = useCallback(() => setHovered(false), [])
+  const hasReverse = useStore((st) => st.edges.some((e) => e.source === target && e.target === source))
+  const show = useCallback(() => setHovered(true), [])
+  const hide = useCallback(() => setHovered(false), [])
 
   if (!sourceNode || !targetNode || !data) return null
 
   const { sx, sy, tx, ty, sourcePos, targetPos } = getFloatingEdgeParams(sourceNode, targetNode)
-  const [edgePath, labelX, labelY] = getBezierPath({
-    sourceX: sx,
-    sourceY: sy,
-    sourcePosition: sourcePos,
-    targetX: tx,
-    targetY: ty,
-    targetPosition: targetPos,
-    curvature: 0.35,
-  })
+  let edgePath: string, labelX: number, labelY: number
+  if (hasReverse) {
+    // Traffic flows both ways between these two nodes: bow each direction to its own side
+    // (perpendicular offset from the s->t normal, which flips for the reverse edge) so the two
+    // routes and their cost labels never sit on top of each other.
+    const dx = tx - sx, dy = ty - sy
+    const len = Math.hypot(dx, dy) || 1
+    const off = Math.min(60, len * 0.18)
+    const cx = (sx + tx) / 2 + (-dy / len) * off
+    const cy = (sy + ty) / 2 + (dx / len) * off
+    edgePath = `M ${sx},${sy} Q ${cx},${cy} ${tx},${ty}`
+    labelX = 0.25 * sx + 0.5 * cx + 0.25 * tx
+    labelY = 0.25 * sy + 0.5 * cy + 0.25 * ty
+  } else {
+    ;[edgePath, labelX, labelY] = getBezierPath({ sourceX: sx, sourceY: sy, sourcePosition: sourcePos, targetX: tx, targetY: ty, targetPosition: targetPos, curvature: 0.35 })
+  }
 
-  const { pair, color, widthPx, breakdownHeading, onSelect, dimmed } = data
-  const topBreakdown = Array.from(pair.breakdown.values())
-    .sort((a, b) => b.cost - a.cost)
-    .slice(0, 5)
-  const moreCount = pair.breakdown.size - topBreakdown.length
+  const { pair, color, widthPx, breakdownHeading, onSelect, dimmed, partial, selected, compact } = data
+  const top = Array.from(pair.breakdown.values()).sort((a, b) => b.cost - a.cost).slice(0, 5)
+  const more = pair.breakdown.size - top.length
+  const srcLabel = sourceNode.data.label
+  const dstLabel = targetNode.data.label
+  const opacity = dimmed ? 0.12 : 1
+  // Dash length scales with width so thick partial edges read as dashed, not as a broken line.
+  const dash = `${Math.round(widthPx * 3 + 6)} ${Math.round(widthPx * 1.5 + 5)}`
 
   return (
     <>
+      {selected && <path d={edgePath} fill="none" stroke="var(--focus)" strokeWidth={widthPx + 6} strokeOpacity={0.45} />}
+      {/* Contrast casing: a thin outline in the canvas ink colour keeps pale low-cost edges visible on light backgrounds. */}
+      <path d={edgePath} fill="none" stroke="var(--edge-casing)" strokeWidth={widthPx + 2} strokeOpacity={dimmed ? 0.05 : 1} strokeLinecap="round" />
       <BaseEdge
         id={id}
         path={edgePath}
         markerEnd={markerEnd}
-        style={{
-          stroke: color,
-          strokeWidth: widthPx,
-          cursor: onSelect ? 'pointer' : 'default',
-          opacity: dimmed ? 0.12 : 1,
-          transition: 'opacity 150ms',
-        }}
+        className="edge-main"
+        style={{ stroke: color, strokeWidth: widthPx, strokeDasharray: partial ? dash : undefined, strokeLinecap: 'round', opacity, transition: 'opacity 150ms', ['--w' as string]: `${widthPx}px` }}
       />
-      {/* Wide invisible hit-path so thin, low-cost edges are still easy to hover/click — a thin
-          visible stroke is bad UX to target precisely, especially once zoomed out. */}
-      <path
-        d={edgePath}
-        fill="none"
-        stroke="transparent"
-        strokeWidth={18}
-        onMouseEnter={showTooltip}
-        onMouseLeave={hideTooltip}
-        onClick={onSelect}
-        style={{ cursor: onSelect ? 'pointer' : 'default' }}
-      />
+      <path d={edgePath} fill="none" stroke="transparent" strokeWidth={18} onMouseEnter={show} onMouseLeave={hide} onClick={onSelect} style={{ cursor: onSelect ? 'pointer' : 'default' }} />
       <EdgeLabelRenderer>
-        <div
-          className="edge-pill"
-          style={{
-            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-            background: color,
-            cursor: onSelect ? 'pointer' : 'default',
-            opacity: dimmed ? 0.12 : 1,
-          }}
-          onMouseEnter={showTooltip}
-          onMouseLeave={hideTooltip}
+        <button
+          type="button"
+          className={`pill nodrag nopan${compact && !hovered && !selected ? ' mini' : ''}${partial ? ' partial' : ''}${selected ? ' selected' : ''}${dimmed ? ' dimmed' : ''}`}
+          style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`, borderColor: color }}
+          onMouseEnter={show}
+          onMouseLeave={hide}
+          onFocus={show}
+          onBlur={hide}
           onClick={onSelect}
+          tabIndex={dimmed ? -1 : 0}
+          aria-label={`${srcLabel} to ${dstLabel}: ${fmtUSD(pair.cost)}, ${fmtGB(pair.gb)}${partial ? ', partial window' : ''}. Open breakdown.`}
         >
-          {fmtUSDShort(pair.cost)}
-        </div>
+          <i style={{ background: color }} aria-hidden="true" />
+          {(!compact || hovered || selected) && fmtUSDShort(pair.cost)}
+        </button>
         {hovered && (
-          <div
-            className="edge-tooltip"
-            style={{ transform: `translate(-50%, 12px) translate(${labelX}px, ${labelY}px)` }}
-          >
-            <div className="tt-title">
-              {sourceNode.data.label} → {targetNode.data.label}
-            </div>
-            <div className="tt-row">
-              <span>Total cost</span>
-              <b>{fmtUSD(pair.cost)}</b>
-            </div>
-            <div className="tt-row">
-              <span>Traffic</span>
-              <b>{fmtGB(pair.gb)}</b>
-            </div>
-            <div className="tt-subhead">{breakdownHeading}</div>
-            {topBreakdown.map((b) => (
-              <div className="tt-row" key={b.label}>
-                <span>{b.label}</span>
-                <b>{fmtUSD(b.cost)}</b>
-              </div>
-            ))}
-            {onSelect && (
-              <div className="tt-clickhint">
-                {moreCount > 0 ? `+${moreCount} more · ` : ''}Click for full breakdown →
-              </div>
+          <div className="tooltip" role="tooltip" style={{ transform: `translate(-50%, 16px) translate(${labelX}px, ${labelY}px)` }}>
+            <div className="tt-title">{srcLabel} → {dstLabel}</div>
+            <div className="tt-row"><span>Cost</span><b>{fmtUSD(pair.cost)}</b></div>
+            <div className="tt-row"><span>Traffic</span><b>{fmtGB(pair.gb)}</b></div>
+            {top.length > 1 && (
+              <>
+                <div className="tt-sub">{breakdownHeading}</div>
+                {top.map((b) => (
+                  <div className="tt-row" key={b.label}><span>{b.label}</span><b>{fmtUSDShort(b.cost)}</b></div>
+                ))}
+              </>
             )}
+            {onSelect && <div className="tt-hint">{more > 0 ? `+${more} more · ` : ''}Click for full breakdown</div>}
           </div>
         )}
       </EdgeLabelRenderer>

@@ -1,5 +1,8 @@
 import type { MapRange, MapResponse } from '../types'
+import type { Theme } from '../theme'
 import { fmtAgo, fmtExact } from '../format'
+import { Segmented } from './Segmented'
+import { dataStatusOf, type DataStatus } from '../labels'
 
 export interface ToolbarProps {
   cloud?: string
@@ -15,135 +18,135 @@ export interface ToolbarProps {
   autoRefresh: boolean
   onAutoRefreshChange: (v: boolean) => void
   onRefreshNow: () => void
+  theme: Theme
+  onThemeChange: (t: Theme) => void
+  filtersOpen: boolean
+  onToggleFilters: () => void
+  activeFilterCount: number
 }
 
-const RANGE_OPTIONS: { value: MapRange; label: string }[] = [
-  { value: '15m', label: 'Last 15 minutes' },
-  { value: '1h', label: 'Last 1 hour' },
-  { value: '6h', label: 'Last 6 hours' },
-  { value: '24h', label: 'Last 24 hours' },
-  { value: '7d', label: 'Last 7 days' },
-  { value: 'custom', label: 'Custom range' },
+const RANGE_OPTIONS: { value: MapRange; label: string; title: string }[] = [
+  { value: '15m', label: '15m', title: 'Last 15 minutes' },
+  { value: '1h', label: '1h', title: 'Last 1 hour' },
+  { value: '6h', label: '6h', title: 'Last 6 hours' },
+  { value: '24h', label: '24h', title: 'Last 24 hours' },
+  { value: '7d', label: '7d', title: 'Last 7 days' },
+  { value: 'custom', label: 'Custom', title: 'Custom date range' },
 ]
 
-/** Top toolbar: page title, cluster/cloud/region identity, data status, time-range picker
- * (including a custom RFC3339 date/time range), refresh controls, and exact freshness
- * timestamps. Every value here is either a real API field or an honest empty-state — cluster
- * name is intentionally NOT shown (ZoneTax's backend has no cluster-identity concept today;
- * showing one would mean fabricating it). */
-export function Toolbar({
-  cloud,
-  region,
-  range,
-  onRangeChange,
-  customSince,
-  customUntil,
-  onCustomRangeChange,
-  data,
-  loading,
-  error,
-  autoRefresh,
-  onAutoRefreshChange,
-  onRefreshNow,
-}: ToolbarProps) {
-  const status: 'loading' | 'error' | 'stale' | 'incomplete' | 'measured' = error
-    ? 'error'
-    : loading && !data
-      ? 'loading'
-      : data && !data.has_data
-        ? 'stale'
-        : data && !data.complete
-          ? 'incomplete'
-          : 'measured'
+const STATUS_LABEL: Record<DataStatus, string> = {
+  loading: 'Loading',
+  error: 'API error',
+  stale: 'No data in window',
+  incomplete: 'Partial window',
+  measured: 'Live',
+}
+const STATUS_TITLE: Record<DataStatus, string> = {
+  loading: 'Fetching data from the collector',
+  error: 'The collector API returned an error',
+  stale: 'The collector has no data for this time window yet',
+  incomplete: 'The collector did not observe the whole selected window (it started later, or was down for part of it). Numbers are real but cover less than the full period.',
+  measured: 'The whole selected window was observed',
+}
 
-  const statusLabel: Record<typeof status, string> = {
-    loading: 'Loading…',
-    error: 'API error',
-    stale: 'No data in this window',
-    incomplete: 'Incomplete window (partial data)',
-    measured: 'Measured',
-  }
-
+/** Sticky top bar (brand, cluster identity, live status, refresh, theme) plus the time bar
+ * (range selector, custom range, exact window). */
+export function Toolbar(p: ToolbarProps) {
+  const status = dataStatusOf(p.data, p.loading, p.error)
   return (
-    <div className="map-toolbar">
-      <div className="map-toolbar-row map-toolbar-top">
-        <h1 className="map-title">Cross-AZ Service Map</h1>
-        <div className="map-identity">
-          <span className="identity-chip">{cloud || '—'}</span>
-          <span className="identity-chip">{region || '—'}</span>
-          <span className={`identity-status status-${status}`}>
-            <span className="dot" />
-            {statusLabel[status]}
-          </span>
+    <>
+      <header className="topbar">
+        <button
+          type="button"
+          className="btn btn-ghost btn-icon"
+          onClick={p.onToggleFilters}
+          aria-expanded={p.filtersOpen}
+          aria-controls="filters"
+          title={p.filtersOpen ? 'Hide filters' : 'Show filters'}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 5h18M6 12h12M10 19h4" /></svg>
+          <span>Filters{p.activeFilterCount > 0 ? ` (${p.activeFilterCount})` : ''}</span>
+        </button>
+        <div className="brand">
+          <span className="brand-mark" aria-hidden="true">Z</span>
+          <div>
+            <h1>ZoneTax</h1>
+            <div className="brand-sub">Cross-AZ network cost</div>
+          </div>
         </div>
-        <div className="map-toolbar-actions">
-          <label className="auto-refresh-toggle">
-            <input type="checkbox" checked={autoRefresh} onChange={(e) => onAutoRefreshChange(e.target.checked)} />
-            Auto-refresh
-          </label>
-          <button type="button" className="refresh-btn" onClick={onRefreshNow} disabled={loading}>
-            {loading ? 'Refreshing…' : '↻ Refresh'}
-          </button>
-        </div>
-      </div>
+        <span className="chip" title="Cloud provider">{p.cloud || '—'}</span>
+        <span className="chip" title="Region">{p.region || '—'}</span>
+        <span className={`status status-${status}`} title={STATUS_TITLE[status]} role="status" aria-live="polite">
+          <span className="dot" aria-hidden="true" />
+          {STATUS_LABEL[status]}
+        </span>
+        <span className="topbar-spacer" />
+        <label className="switch">
+          <input type="checkbox" checked={p.autoRefresh} onChange={(e) => p.onAutoRefreshChange(e.target.checked)} />
+          Auto-refresh
+        </label>
+        <button type="button" className="btn" onClick={p.onRefreshNow} disabled={p.loading}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8" /><path d="M21 3v5h-5" /></svg>
+          {p.loading ? 'Refreshing' : 'Refresh'}
+        </button>
+        <button
+          type="button"
+          className="btn btn-icon"
+          onClick={() => p.onThemeChange(p.theme === 'dark' ? 'light' : 'dark')}
+          aria-label={p.theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          title={p.theme === 'dark' ? 'Light theme' : 'Dark theme'}
+        >
+          {p.theme === 'dark' ? (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg>
+          )}
+        </button>
+      </header>
 
-      <div className="map-toolbar-row map-toolbar-range">
-        <div className="range-picker" role="tablist" aria-label="Time range">
-          {RANGE_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              role="tab"
-              aria-selected={range === opt.value}
-              className={range === opt.value ? 'active' : ''}
-              onClick={() => onRangeChange(opt.value)}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-
-        {range === 'custom' && (
-          <div className="custom-range-inputs">
-            <label>
-              Since
+      <nav className="timebar" aria-label="Time range">
+        <Segmented label="Time range" options={RANGE_OPTIONS} value={p.range} onChange={p.onRangeChange} />
+        {p.range === 'custom' && (
+          <div className="custom-range">
+            <label className="field">
+              From
               <input
+                className="input"
                 type="datetime-local"
-                value={customSince ? toLocalInputValue(customSince) : ''}
-                onChange={(e) => onCustomRangeChange(e.target.value ? fromLocalInputValue(e.target.value) : null, customUntil)}
+                value={p.customSince ? toLocalInputValue(p.customSince) : ''}
+                onChange={(e) => p.onCustomRangeChange(e.target.value ? fromLocalInputValue(e.target.value) : null, p.customUntil)}
               />
             </label>
-            <label>
-              Until
+            <label className="field">
+              To
               <input
+                className="input"
                 type="datetime-local"
-                value={customUntil ? toLocalInputValue(customUntil) : ''}
-                onChange={(e) => onCustomRangeChange(customSince, e.target.value ? fromLocalInputValue(e.target.value) : null)}
+                value={p.customUntil ? toLocalInputValue(p.customUntil) : ''}
+                onChange={(e) => p.onCustomRangeChange(p.customSince, e.target.value ? fromLocalInputValue(e.target.value) : null)}
               />
             </label>
           </div>
         )}
-
-        <div className="range-window-label">
-          {data ? (
+        <div className="window-label">
+          {p.data ? (
             <>
-              <span className="window-exact">
-                {fmtExact(data.range_start_utc)} → {fmtExact(data.range_end_utc)}
-              </span>
-              <span className="window-ago">last collected {fmtAgo(data.server_time_utc)}</span>
+              <strong className="num">
+                {fmtExact(p.data.range_start_utc)} – {fmtExact(p.data.range_end_utc)}
+              </strong>
+              <br />
+              updated {fmtAgo(p.data.server_time_utc)}
             </>
           ) : (
-            <span className="window-ago">no data yet</span>
+            'No data yet'
           )}
         </div>
-      </div>
-    </div>
+      </nav>
+    </>
   )
 }
 
-// datetime-local inputs want "YYYY-MM-DDTHH:mm" in LOCAL time with no timezone suffix; we store
-// state as full RFC3339 UTC (what the API needs) — these two converters bridge that gap without
-// losing precision or silently assuming UTC-as-local.
+// datetime-local wants local "YYYY-MM-DDTHH:mm"; state is stored as RFC3339 UTC for the API.
 function toLocalInputValue(iso: string): string {
   const d = new Date(iso)
   const pad = (n: number) => String(n).padStart(2, '0')
