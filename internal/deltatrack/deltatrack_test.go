@@ -81,14 +81,14 @@ func TestPrune_RemovesClosedConnections(t *testing.T) {
 func TestApplyFlowDeltas_RewritesOrigBytesToPerSampleDelta(t *testing.T) {
 	tr := New()
 
-	// Sample 1: two flows, both first-seen — full cumulative value is the correct delta.
+	// Sample 1 (agent just started): connections that were already open only set baselines.
 	sample1 := []conntrack.Flow{
 		flow("10.0.1.1", 100, "10.0.2.1", 80, 1000),
 		flow("10.0.1.2", 200, "10.0.2.2", 443, 500),
 	}
 	out1 := tr.ApplyFlowDeltas(sample1)
-	if out1[0].OrigBytes != 1000 || out1[1].OrigBytes != 500 {
-		t.Fatalf("sample1 deltas = %d, %d; want 1000, 500", out1[0].OrigBytes, out1[1].OrigBytes)
+	if out1[0].OrigBytes != 0 || out1[1].OrigBytes != 0 {
+		t.Fatalf("first sample after start must be baseline-only, got %d, %d", out1[0].OrigBytes, out1[1].OrigBytes)
 	}
 
 	// Sample 2: first flow persists and grew (the long-lived-connection case that caused the
@@ -128,14 +128,32 @@ func TestApplyFlowDeltas_FlowsWithoutByteAccountingPassThroughUnchanged(t *testi
 
 func TestApplyFlowDeltas_ReplyBytesAreDeltaedToo(t *testing.T) {
 	tr := New()
+	tr.ApplyFlowDeltas(nil) // agent startup sample
 	f := conntrack.Flow{Protocol: "tcp", OrigSrcIP: "a", OrigDstIP: "b", OrigSrcPort: 1, OrigDstPort: 2, OrigBytes: 100, ReplyBytes: 1000}
 	out := tr.ApplyFlowDeltas([]conntrack.Flow{f})
 	if out[0].OrigBytes != 100 || out[0].ReplyBytes != 1000 {
-		t.Fatalf("first sample: %+v", out[0])
+		t.Fatalf("new connection after startup should count in full: %+v", out[0])
 	}
 	f.OrigBytes, f.ReplyBytes = 150, 4000
 	out = tr.ApplyFlowDeltas([]conntrack.Flow{f})
 	if out[0].OrigBytes != 50 || out[0].ReplyBytes != 3000 {
 		t.Fatalf("second sample deltas: orig=%d reply=%d, want 50/3000", out[0].OrigBytes, out[0].ReplyBytes)
+	}
+}
+
+// QA: restarting one agent reported ~4 GB in 2 minutes. Long-lived connections already open at
+// startup carried their whole lifetime byte count into the first sample.
+func TestApplyFlowDeltas_AgentRestartDoesNotCountPreexistingConnections(t *testing.T) {
+	tr := New()
+	longLived := conntrack.Flow{Protocol: "tcp", OrigSrcIP: "a", OrigDstIP: "b", OrigSrcPort: 1, OrigDstPort: 2, OrigBytes: 5_000_000_000, ReplyBytes: 9_000_000_000}
+	out := tr.ApplyFlowDeltas([]conntrack.Flow{longLived})
+	if out[0].OrigBytes != 0 || out[0].ReplyBytes != 0 {
+		t.Fatalf("pre-existing connection counted at startup: %+v", out[0])
+	}
+	longLived.OrigBytes += 100
+	longLived.ReplyBytes += 200
+	out = tr.ApplyFlowDeltas([]conntrack.Flow{longLived})
+	if out[0].OrigBytes != 100 || out[0].ReplyBytes != 200 {
+		t.Fatalf("subsequent sample should count only new bytes: %+v", out[0])
 	}
 }

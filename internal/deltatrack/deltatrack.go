@@ -44,6 +44,12 @@ func keyOf(f conntrack.Flow) Key {
 // goroutine at a time via runSampleLoop's ticker, so this is fine as a plain map).
 type Tracker struct {
 	last map[Key]int64
+	// primed is false until the first ApplyFlowDeltas call. Connections already open when the
+	// agent starts carry their whole lifetime byte count (possibly weeks of traffic); counting
+	// that as "this sample" produced a huge spike on every agent restart (found by QA: one agent
+	// restart reported ~4 GB in 2 minutes from long-lived metrics-server connections). The first
+	// sample therefore only records baselines.
+	primed bool
 }
 
 // New returns an empty Tracker.
@@ -94,6 +100,8 @@ func (t *Tracker) Prune(seen map[Key]bool) {
 func (t *Tracker) ApplyFlowDeltas(flows []conntrack.Flow) []conntrack.Flow {
 	out := make([]conntrack.Flow, len(flows))
 	seen := make(map[Key]bool, len(flows))
+	baselineOnly := !t.primed
+	t.primed = true
 	for i, f := range flows {
 		out[i] = f
 		if f.OrigBytes < 0 {
@@ -109,6 +117,9 @@ func (t *Tracker) ApplyFlowDeltas(flows []conntrack.Flow) []conntrack.Flow {
 			rk.Reply = true
 			seen[rk] = true
 			out[i].ReplyBytes = t.Delta(rk, f.ReplyBytes)
+		}
+		if baselineOnly {
+			out[i].OrigBytes, out[i].ReplyBytes = 0, 0
 		}
 	}
 	t.Prune(seen)
