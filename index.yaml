@@ -2,6 +2,26 @@ apiVersion: v1
 entries:
   zonetax:
   - apiVersion: v2
+    appVersion: 0.4.0
+    created: "2026-10-04T18:42:07.928744928Z"
+    description: Real-time cross-AZ Kubernetes network cost visibility (AWS/EKS)
+    digest: 60ad9e80d1ce366df7d55f43919283c5750ead77ba0fb4e75f5081baa155c5a5
+    home: https://github.com/gargkrishna730/zonetax
+    keywords:
+    - kubernetes
+    - finops
+    - cost
+    - networking
+    - aws
+    - eks
+    name: zonetax
+    sources:
+    - https://github.com/gargkrishna730/zonetax
+    type: application
+    urls:
+    - https://github.com/gargkrishna730/zonetax/releases/download/v0.4.0/zonetax-0.4.0.tgz
+    version: 0.4.0
+  - apiVersion: v2
     appVersion: 0.3.1
     created: "2026-10-04T17:45:14.343732303Z"
     description: Real-time cross-AZ Kubernetes network cost visibility (AWS/EKS)
@@ -81,4 +101,4 @@ entries:
     urls:
     - https://github.com/gargkrishna730/zonetax/releases/download/v0.1.0/zonetax-0.1.0.tgz
     version: 0.1.0
-generated: "2026-10-04T17:45:14.343368421Z"
+generated: "2026-10-04T18:42:07.92818002Z"
