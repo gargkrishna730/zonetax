@@ -30,6 +30,7 @@ type mapEntry struct {
 }
 
 type mapResponse struct {
+	UnobservedSeconds   int        `json:"unobserved_seconds"`
 	RangeRequested      string     `json:"range_requested"`
 	RangeStartUTC       string     `json:"range_start_utc"`
 	RangeEndUTC         string     `json:"range_end_utc"`
@@ -255,7 +256,11 @@ func printHeader(w io.Writer, title string, m mapResponse) {
 	}
 	fmt.Fprintln(w)
 	if m.HasData && !m.Complete {
-		fmt.Fprintln(w, "Note: partial window, the collector has not observed the full range yet. Numbers are real but cover less than the requested period.")
+		if m.UnobservedSeconds > 0 {
+			fmt.Fprintf(w, "Note: the collector missed %s of this window (restart or gap). Everything else is real.\n", fmtDur(m.UnobservedSeconds))
+		} else {
+			fmt.Fprintln(w, "Note: partial window, the collector has not observed the full range yet. Numbers are real but cover less than the requested period.")
+		}
 	}
 	fmt.Fprintln(w)
 }
@@ -285,6 +290,21 @@ func byZonePair(entries []mapEntry) []zoneAgg {
 		}
 	}
 	return out
+}
+
+// fmtDur renders a duration in seconds as "40s", "12m", "2h 5m".
+func fmtDur(sec int) string {
+	switch {
+	case sec < 60:
+		return fmt.Sprintf("%ds", sec)
+	case sec < 3600:
+		return fmt.Sprintf("%dm", sec/60)
+	default:
+		if m := (sec % 3600) / 60; m > 0 {
+			return fmt.Sprintf("%dh %dm", sec/3600, m)
+		}
+		return fmt.Sprintf("%dh", sec/3600)
+	}
 }
 
 func workload(ns, name string) string {

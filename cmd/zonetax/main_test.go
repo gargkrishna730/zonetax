@@ -150,3 +150,25 @@ func TestFormatting(t *testing.T) {
 		}
 	}
 }
+
+func TestPartialWindowReportsMissedTime(t *testing.T) {
+	m := sample
+	m.Complete = false
+	m.UnobservedSeconds = 40
+	srv := fakeCollector(t, m, nil)
+	_, out, _ := runCLI("top", "--url", srv.URL)
+	if !strings.Contains(out, "missed 40s") {
+		t.Errorf("expected the missed duration, got:\n%s", out)
+	}
+	if strings.Contains(out, "has not observed the full range") {
+		t.Errorf("vague wording should be replaced when the duration is known:\n%s", out)
+	}
+}
+
+func TestFmtDur(t *testing.T) {
+	for in, want := range map[int]string{40: "40s", 90: "1m", 3600: "1h", 7500: "2h 5m"} {
+		if got := fmtDur(in); got != want {
+			t.Errorf("fmtDur(%d) = %q, want %q", in, got, want)
+		}
+	}
+}
