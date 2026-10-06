@@ -33,7 +33,7 @@ flowchart LR
 | `internal/conntrack` | Parses `/proc/net/nf_conntrack` |
 | `internal/deltatrack` | Turns cumulative per-connection bytes into per-sample deltas (fixed ~80x overcount) |
 | `internal/podindex`, `azmap` | client-go informers, IP to pod/workload, node label `topology.kubernetes.io/zone` |
-| `internal/aggregator`, `metrics` | Per (srcAZ, dstAZ, ns, workload, dst_workload) byte counters |
+| `internal/aggregator`, `metrics` | Per (srcAZ, dstAZ, ns, workload, dst_workload) byte counters. Counts BOTH directions; only the source pod's node counts a connection (else double counting); reports unattributed bytes |
 | `internal/scrape`, `costengine`, `pricing` | Collector side: scrape, apply YAML price table ($0.01/GB each direction) |
 | `internal/collector/history.go` | Hourly buckets via snapshot diffing, honest `has_data`/`complete`, gap markers for downtime |
 | `internal/collector/accumulate.go` | Per-agent observed deltas (failed scrape / new agent / reset never spike) |
@@ -72,7 +72,11 @@ The collector embeds `ui/dist`, so build the UI before building the collector im
 7. `kubectl rollout restart` kills existing port-forwards. Restart them after every deploy.
 8. User is token-budget sensitive: plan briefly, then act fast, avoid long trial-and-error loops.
 9. Commit as you go, update `docs/PROGRESS.md` and this file when state changes.
-10. UI rules: cost colour only from `costScale()`; red = error only; partial data = dashed/hatched,
+10. Accuracy rules: a connection is counted once cluster-wide (source pod's node only); both
+    directions count (OrigBytes and ReplyBytes); the first sample after agent start is baseline
+    only; resolve destinations via the reply tuple (Services); never silently drop traffic, report
+    it as unattributed. Verify with known traffic (send N GiB between test pods), not by reading code.
+11. UI rules: cost colour only from `costScale()`; red = error only; partial data = dashed/hatched,
     never recoloured or shown as $0; every interactive thing keyboard reachable; run axe
     (0 violations, dark + light) and screenshot against live data before shipping UI changes.
 
@@ -87,9 +91,11 @@ The collector embeds `ui/dist`, so build the UI before building the collector im
   `helm --wait` reports failed because one agent pod is Pending on a memory-full node; resources
   still apply. Upgrade with `-f values`, never `--reuse-values` (drops new chart defaults).
 - v0.2.0: persistent history (2026-10-03). Dev runs it with `collector.persistence.enabled=true`.
-- v0.3.0: UI revamp (accessible colour system, light theme, keyboard support) + accuracy doc
-  (ZoneTax within 4% of the AWS bill over 23 h). A same-day recheck was scheduled for Oct 5.
-- **Next:** M4 alerting (Slack webhook), agent priorityClassName option, eBPF, multi-cloud.
+- v0.3.x: UI revamp (accessible colour system, light theme, keyboard support).
+- **v0.4.0 to v0.6.1 (2026-10-06): end-to-end QA found and fixed 10 bugs**, three of them serious
+  counting errors. See `docs/qa/report-2026-10-06.md`. Controlled tests now measure within 1% of
+  bytes actually sent (upload, download, via Service).
+- **Next:** M4 alerting (Slack webhook), eBPF, multi-cloud.
 
 ## Memory system (how context survives)
 

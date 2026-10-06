@@ -16,7 +16,8 @@ timeline
   2026-09-07 : Removed internal names : Cost FAQ in README : Demo GIF
   2026-09-08 : Agreed next plan, Helm repo publish, CLI, raw manifests
   2026-10-03 : Moved to Jcode, AGENTS.md + PROGRESS.md : CLI (M5) : Helm repo + raw manifests + release workflow : Collector memory fix
-  2026-10-04 : Accuracy within 4% of AWS bill : UI revamp, light theme, accessibility : v0.3.0
+  2026-10-04 : UI revamp, light theme, accessibility : v0.3.0 : cluster cost fix $2.32 to $0.03/day
+  2026-10-06 : End-to-end QA : 10 bugs fixed (double counting, downloads, restart spike) : v0.4.0-v0.6.1
 ```
 
 ## Key decisions
@@ -92,3 +93,15 @@ sessions start with full context. Next: Helm repo publish, then CLI, then genera
   projected per day/month, promoted spend chart, layered workload map, simpler filters, full
   keyboard support. axe 0 violations dark + light on the deployed build; colour-blindness
   simulation checked; no horizontal overflow at 390 px.
+
+### 2026-10-06: end-to-end QA, v0.4.0 to v0.6.1
+Full QA against the live cluster (plan: docs/qa/qa-plan.md, results: docs/qa/report-2026-10-06.md).
+Ten bugs found and fixed, including three that made the numbers wrong:
+- every cross-node connection counted twice (1 GiB read as 2.16 GB),
+- downloads not counted at all (1 GiB read as 0.003 GB),
+- agent restarts reporting ~4 GB of fake traffic from pre-existing connections.
+These first two partly cancelled out, which is why the earlier "within 4% of the AWS bill" looked
+good; that claim is corrected in docs/accuracy.md. After the fixes, controlled tests measure
+within 1%. Also: traffic via Services and node IPs is now attributed, unattributed traffic is
+reported instead of silently dropped, partial windows say how much time was missed, the agent
+DaemonSet rollout no longer stalls, and the sticky header no longer overlaps the page.
