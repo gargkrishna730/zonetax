@@ -7,7 +7,7 @@
 > traffic through a Service was counted once), so the errors partly offset each other on this
 > cluster. The within-4% comparison below is therefore **not** reliable evidence of accuracy. Fixed in v0.4.0, where controlled tests
 > measure within 1% (see "Controlled test" below). A fresh comparison against the AWS bill on
-> v0.4.0 data replaces the table below once a full day has been collected.
+> v0.4.0 data is in "Full-day comparison" below.
 
 ## Controlled test (v0.4.0)
 
@@ -25,6 +25,32 @@ plus headers, which is also what AWS bills.
 
 The same test on v0.3.1 reported 2.16 GB for the upload (double counted) and 0.003 GB for the
 download (reply direction ignored).
+
+## Full-day comparison vs the AWS bill (v0.4.0, 2026-10-05 UTC)
+
+| | Cost |
+|---|---|
+| AWS Cost Explorer, this cluster's EC2 instances | **$0.0693** (6.9 GB billed both sides = 3.5 GB unique) |
+| ZoneTax, same UTC day, complete window | **$0.0381** (1.9 GB) |
+| Difference | **-45%** |
+
+ZoneTax reports about half of what AWS bills on this day. The gap is **not** a counting error
+(controlled tests above are within 1%): ZoneTax only attributes **pod-to-pod** traffic. Anything
+with an endpoint outside the cluster is skipped: managed databases, S3 and other AWS services,
+load balancers, the Kubernetes API server, internet egress, and traffic to a pod the index has
+not seen. On a quiet day, when the large pod-to-pod flows have been fixed, that unattributed
+traffic dominates what remains, so the percentage gap looks large even though the absolute
+difference is a few cents.
+
+Since v0.4.1 the agent exposes `zonetax_agent_unattributed_bytes_total`, and the dashboard shows
+it as "N GB outside the cluster, not costed" next to cross-AZ traffic, so this gap is visible
+rather than silently missing.
+
+Reading the two numbers:
+- **ZoneTax** answers "which of my workloads talk across AZs, and what does that cost" (the part
+  you can act on by moving a workload).
+- **The AWS bill** is every cross-AZ byte the account produced, including traffic ZoneTax cannot
+  attribute to a pod pair.
 
 ## Earlier comparison (v0.2.0, superseded)
 

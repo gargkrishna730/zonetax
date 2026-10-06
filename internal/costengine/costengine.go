@@ -13,7 +13,11 @@ import (
 const (
 	crossAZMetricName = "zonetax_agent_cross_az_bytes_total"
 	sameAZMetricName  = "zonetax_agent_same_az_bytes_total"
-	bytesPerGB        = 1e9
+	// unattributedMetricName carries bytes on flows with an endpoint outside the cluster. Not
+	// billed by ZoneTax (it cannot tell which side crossed an AZ), but reported so the UI can
+	// state how much traffic ZoneTax could not explain.
+	unattributedMetricName = "zonetax_agent_unattributed_bytes_total"
+	bytesPerGB             = 1e9
 
 	// crossAZBillingMultiplier accounts for how AWS actually bills cross-AZ transfer: the
 	// pricing table stores AWS's published PER-DIRECTION rate (e.g. $0.01/GB for us-east-1,
@@ -57,6 +61,10 @@ type Summary struct {
 	TotalCrossAZGB      float64 `json:"total_cross_az_gb"`
 	TotalCrossAZCost    float64 `json:"total_cross_az_cost_usd"`
 	TotalSameAZGB       float64 `json:"total_same_az_gb"`
+	// TotalUnattributedGB is traffic ZoneTax saw but could not attribute to two in-cluster pods
+	// (internet, managed services, load balancers). Some of it may be billed by the cloud; it is
+	// reported separately rather than guessed at.
+	TotalUnattributedGB float64 `json:"total_unattributed_gb"`
 }
 
 // Compute sums the given cross-AZ and same-AZ metric families (typically merged from multiple
@@ -101,6 +109,12 @@ func Compute(families map[string]*dto.MetricFamily, table *pricing.Table, cloud,
 		}
 	}
 
+	if mf, ok := families[unattributedMetricName]; ok {
+		for _, m := range mf.GetMetric() {
+			summary.TotalUnattributedGB += m.GetCounter().GetValue() / bytesPerGB
+		}
+	}
+
 	if mf, ok := families[sameAZMetricName]; ok {
 		for _, m := range mf.GetMetric() {
 			summary.TotalSameAZGB += m.GetCounter().GetValue() / bytesPerGB
@@ -134,7 +148,7 @@ func MergeFamilies(perAgent []map[string]*dto.MetricFamily) map[string]*dto.Metr
 
 	for _, families := range perAgent {
 		for name, mf := range families {
-			if name != crossAZMetricName && name != sameAZMetricName {
+			if name != crossAZMetricName && name != sameAZMetricName && name != unattributedMetricName {
 				continue
 			}
 			metricTypes[name] = mf.GetType()

@@ -9,13 +9,14 @@ export interface SummaryStripProps {
   partial: boolean
   observedHours: number | null
   crossAZTrafficPercent: number | null
+  unattributedGB?: number
 }
 
 const RANGE_DAYS: Partial<Record<MapRange, number>> = { '1h': 1 / 24, '6h': 0.25, '24h': 1, '7d': 7 }
 
 /** Four headline KPIs. Each states its window; partial windows are flagged in words, and the
  * daily run-rate is only shown when it can be computed honestly from observed time. */
-export function SummaryStrip({ summary, range, partial, observedHours, crossAZTrafficPercent }: SummaryStripProps) {
+export function SummaryStrip({ summary, range, partial, observedHours, crossAZTrafficPercent, unattributedGB }: SummaryStripProps) {
   const label = RANGE_LABEL[range]
   const days = RANGE_DAYS[range]
   const hours = partial ? observedHours : days ? days * 24 : null
@@ -49,6 +50,11 @@ export function SummaryStrip({ summary, range, partial, observedHours, crossAZTr
           {summary.routeCount} zone route{summary.routeCount === 1 ? '' : 's'} · {summary.affectedWorkloadCount} workloads
           {crossAZTrafficPercent !== null && ` · ${crossAZTrafficPercent.toFixed(0)}% of all traffic`}
         </span>
+        {unattributedGB !== undefined && unattributedGB > 0 && (
+          <span className="kpi-sub" title="Traffic with an endpoint outside the cluster (internet, managed databases, load balancers). ZoneTax cannot tell which side crossed an AZ, so it is not costed here, but your cloud bill may include part of it.">
+            + {fmtGB(unattributedGB)} outside the cluster, not costed
+          </span>
+        )}
       </div>
       <div className="card kpi">
         <span className="kpi-label">Top cost driver</span>

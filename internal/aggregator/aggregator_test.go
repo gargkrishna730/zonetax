@@ -200,3 +200,20 @@ func TestAggregate_ServiceTrafficResolvedViaReplyTuple(t *testing.T) {
 		t.Errorf("client->server via service = %d, want 700", got)
 	}
 }
+
+// Bytes ZoneTax cannot attribute (an endpoint outside the cluster) are reported, not dropped
+// silently: QA found ZoneTax 45% below the AWS bill on a day dominated by non-pod traffic.
+func TestAggregate_UnattributedBytesReported(t *testing.T) {
+	topo := twoNode()
+	flows := []conntrack.Flow{
+		{OrigSrcIP: "10.0.1.1", OrigDstIP: "8.8.8.8", OrigBytes: 400, ReplyBytes: 600},
+		{OrigSrcIP: "10.0.1.1", OrigDstIP: "10.0.2.1", ReplySrcIP: "10.0.2.1", OrigBytes: 100},
+	}
+	out := Aggregate(flows, topo.resolve, "node-a")
+	if out.Unresolved != 1 || out.UnattributedBytes != 1000 {
+		t.Fatalf("unresolved=%d unattributed=%d, want 1 and 1000", out.Unresolved, out.UnattributedBytes)
+	}
+	if got := bytesFor(out, "client", "server"); got != 100 {
+		t.Errorf("attributed bytes = %d, want 100", got)
+	}
+}

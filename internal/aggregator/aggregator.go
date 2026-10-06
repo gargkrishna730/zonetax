@@ -45,6 +45,10 @@ type Result struct {
 type AggregateOutput struct {
 	Results    []Result
 	Unresolved int
+	// UnattributedBytes is how many bytes those skipped flows carried. AWS may still bill this
+	// traffic (it is just not pod-to-pod), so reporting it keeps the gap between ZoneTax and the
+	// bill visible instead of invisible.
+	UnattributedBytes int64
 }
 
 // Aggregate attributes the bytes in each conntrack flow to the workloads and AZs at both ends.
@@ -65,6 +69,7 @@ type AggregateOutput struct {
 func Aggregate(flows []conntrack.Flow, resolve ResolveFunc, localNode string) AggregateOutput {
 	totals := make(map[Key]int64)
 	unresolved := 0
+	var unattributed int64
 
 	for _, f := range flows {
 		srcPod, srcNode, srcOK := resolve(f.OrigSrcIP)
@@ -81,6 +86,12 @@ func Aggregate(flows []conntrack.Flow, resolve ResolveFunc, localNode string) Ag
 		}
 		if !srcOK || !dstOK {
 			unresolved++
+			if f.OrigBytes > 0 {
+				unattributed += f.OrigBytes
+			}
+			if f.ReplyBytes > 0 {
+				unattributed += f.ReplyBytes
+			}
 			continue
 		}
 		if localNode != "" && srcPod.NodeName != localNode {
@@ -107,5 +118,5 @@ func Aggregate(flows []conntrack.Flow, resolve ResolveFunc, localNode string) Ag
 	for k, b := range totals {
 		results = append(results, Result{Key: k, Bytes: b})
 	}
-	return AggregateOutput{Results: results, Unresolved: unresolved}
+	return AggregateOutput{Results: results, Unresolved: unresolved, UnattributedBytes: unattributed}
 }

@@ -60,8 +60,22 @@ var UnresolvedFlowsTotal = prometheus.NewCounter(
 	},
 )
 
+// UnattributedBytesTotal counts bytes on flows ZoneTax could not attribute to two known pods:
+// traffic to or from outside the cluster (internet, RDS, S3, load balancers, kubelet) and pods
+// not yet in the index. These bytes may still appear on the AWS bill, so exposing them lets an
+// operator see how much of their cross-AZ spend ZoneTax cannot explain, instead of silently
+// under-reporting.
+var UnattributedBytesTotal = prometheus.NewCounter(
+	prometheus.CounterOpts{
+		Namespace: "zonetax",
+		Subsystem: "agent",
+		Name:      "unattributed_bytes_total",
+		Help:      "Bytes on flows skipped because an endpoint could not be resolved to a known pod (outside-cluster traffic).",
+	},
+)
+
 // MustRegister registers all agent metrics with the given registerer. Called once at startup;
 // panics on duplicate registration (a programming error, not a runtime condition to recover from).
 func MustRegister(reg prometheus.Registerer) {
-	reg.MustRegister(CrossAZBytesTotal, SameAZBytesTotal, SampleDurationSeconds, UnresolvedFlowsTotal)
+	reg.MustRegister(CrossAZBytesTotal, SameAZBytesTotal, SampleDurationSeconds, UnresolvedFlowsTotal, UnattributedBytesTotal)
 }

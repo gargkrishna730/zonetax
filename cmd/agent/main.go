@@ -151,6 +151,9 @@ func sampleOnce(store *podindex.Store, tracker *deltatrack.Tracker, localNode st
 	if out.Unresolved > 0 {
 		metrics.UnresolvedFlowsTotal.Add(float64(out.Unresolved))
 	}
+	if out.UnattributedBytes > 0 {
+		metrics.UnattributedBytesTotal.Add(float64(out.UnattributedBytes))
+	}
 
 	for _, r := range out.Results {
 		if r.CrossAZ() {

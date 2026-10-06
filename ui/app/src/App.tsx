@@ -501,6 +501,7 @@ export default function App() {
             partial={status === 'incomplete'}
             observedHours={observedHours}
             crossAZTrafficPercent={crossAZTrafficPercent}
+            unattributedGB={costs?.totals.total_unattributed_gb}
           />
 
           <CostHistoryChart range={historyRange} onRangeChange={setHistoryRange} history={history.data} loading={history.loading} error={history.error} />

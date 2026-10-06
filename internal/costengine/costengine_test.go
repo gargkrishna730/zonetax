@@ -162,3 +162,23 @@ func TestMergeFamilies_DistinctLabelsKeptSeparate(t *testing.T) {
 		t.Errorf("merged metric count = %d, want 2 distinct entries", len(merged[crossAZMetricName].Metric))
 	}
 }
+
+func TestCompute_UnattributedBytesReported(t *testing.T) {
+	families := map[string]*dto.MetricFamily{
+		unattributedMetricName: {
+			Name: strp(unattributedMetricName), Type: mtypep(),
+			Metric: []*dto.Metric{{Counter: &dto.Counter{Value: f64p(2e9)}}},
+		},
+	}
+	table, _ := pricing.LoadDefault()
+	s, err := Compute(families, table, "aws", "us-east-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.TotalUnattributedGB != 2 {
+		t.Errorf("TotalUnattributedGB = %v, want 2", s.TotalUnattributedGB)
+	}
+	if s.TotalCrossAZCost != 0 {
+		t.Errorf("unattributed traffic must not be billed, got %v", s.TotalCrossAZCost)
+	}
+}

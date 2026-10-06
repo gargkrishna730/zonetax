@@ -17,6 +17,9 @@ export interface CostsTotals {
   cross_az_cost_usd: number
   cross_az_gb: number
   same_az_gb: number
+  // Traffic ZoneTax saw but could not attribute to two in-cluster pods (internet, managed
+  // services, load balancers). Some of it may still be billed, so it is shown, not hidden.
+  total_unattributed_gb?: number
   price_per_gb_usd: number
   price_per_gb_direction_usd?: number
 }
