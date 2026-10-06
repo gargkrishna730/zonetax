@@ -101,6 +101,9 @@ export interface MapResponse {
   // history began, or extends into the current in-progress moment) — never present a partial
   // number as if it were the full requested window's total.
   complete: boolean
+  // How much of the requested window the collector did not observe (restart, or history began
+  // mid-window). Lets the UI say "23.9 of 24 h observed" instead of a bare "partial".
+  unobserved_seconds?: number
   price_per_gb_usd: number
   price_per_gb_direction_usd: number
   entries: MapEntry[]

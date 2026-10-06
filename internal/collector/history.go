@@ -177,14 +177,25 @@ type RouteDelta struct {
 // Pass 0 to require an exact match (preserves the old, stricter behavior for tests/callers that
 // want it); real callers should pass a small multiple of the collector's scrape interval.
 func (h *History) EntriesRange(since, now time.Time, freshnessTolerance time.Duration) (deltas []RouteDelta, hasData bool, complete bool) {
+	d, has, comp, _ := h.entriesRange(since, now, freshnessTolerance)
+	return d, has, comp
+}
+
+// EntriesRangeDetailed also reports how much of the window the collector did not observe
+// (collector downtime inside the window), so the UI can say how partial a window is.
+func (h *History) EntriesRangeDetailed(since, now time.Time, freshnessTolerance time.Duration) (deltas []RouteDelta, hasData bool, complete bool, missing time.Duration) {
+	return h.entriesRange(since, now, freshnessTolerance)
+}
+
+func (h *History) entriesRange(since, now time.Time, freshnessTolerance time.Duration) (deltas []RouteDelta, hasData bool, complete bool, missing time.Duration) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	if len(h.snaps) == 0 {
-		return nil, false, false
+		return nil, false, false, 0
 	}
 	latest, latestOK := snapshotAtOrBefore(h.snaps, now)
 	if !latestOK {
-		return nil, false, false
+		return nil, false, false, 0
 	}
 	baseline, baselineOK := snapshotAtOrBefore(h.snaps, since)
 	usedFallback := false
@@ -194,13 +205,13 @@ func (h *History) EntriesRange(since, now time.Time, freshnessTolerance time.Dur
 			baselineOK = true
 			usedFallback = true
 		} else {
-			return nil, false, false
+			return nil, false, false, 0
 		}
 	}
 	if baseline.at.Equal(latest.at) {
 		// Same snapshot on both ends (e.g. a 15m window shorter than the scrape interval) —
 		// there is technically no delta to report yet, distinct from "no data at all".
-		return nil, true, false
+		return nil, true, false, 0
 	}
 
 	// Union of every route key seen in either snapshot — a route that existed at `since` but
@@ -230,9 +241,13 @@ func (h *History) EntriesRange(since, now time.Time, freshnessTolerance time.Dur
 		})
 	}
 	staleness := now.Sub(mostRecentSnapshotTime(h.snaps))
-	overlapsGap, _ := gapOverlap(h.snaps, since, now)
+	overlapsGap, _, missing := gapOverlapDuration(h.snaps, since, now)
+	if usedFallback {
+		// History began after the window started: the unobserved part is that leading portion.
+		missing += h.snaps[0].at.Sub(since)
+	}
 	complete = !usedFallback && !overlapsGap && staleness <= freshnessTolerance
-	return deltas, true, complete
+	return deltas, true, complete, missing
 }
 
 // Bucket is one time-bucketed cost/traffic delta, plus whether the bucket is fully observed.
@@ -384,6 +399,15 @@ func (h *History) EarliestSnapshot() time.Time {
 // gapOverlap reports whether [a, b] overlaps any unobserved interval (between a gap-marked
 // snapshot and the one before it), and whether one such interval covers [a, b] entirely.
 func gapOverlap(snaps []snapshot, a, b time.Time) (overlaps, covers bool) {
+	overlaps, covers, _ = gapOverlapDuration(snaps, a, b)
+	return overlaps, covers
+}
+
+// gapOverlapDuration also returns how much of [a, b] was unobserved, so callers can report
+// "23.9 of 24 h observed" instead of only a yes/no "partial". A 40-second collector restart
+// makes a 24-hour window technically partial; without the duration that is indistinguishable
+// from having missed half the day.
+func gapOverlapDuration(snaps []snapshot, a, b time.Time) (overlaps, covers bool, missing time.Duration) {
 	for i := 1; i < len(snaps); i++ {
 		if !snaps[i].afterGap {
 			continue
@@ -394,7 +418,17 @@ func gapOverlap(snaps []snapshot, a, b time.Time) (overlaps, covers bool) {
 			if !gs.After(a) && !ge.Before(b) {
 				covers = true
 			}
+			lo, hi := gs, ge
+			if lo.Before(a) {
+				lo = a
+			}
+			if hi.After(b) {
+				hi = b
+			}
+			if hi.After(lo) {
+				missing += hi.Sub(lo)
+			}
 		}
 	}
-	return overlaps, covers
+	return overlaps, covers, missing
 }

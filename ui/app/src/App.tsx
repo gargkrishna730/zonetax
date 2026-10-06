@@ -16,7 +16,7 @@ import './dashboard.css'
 
 import type { CostsResponse, HistoryRange, MapEntry, MapRange } from './types'
 import { buildZoneFlow, buildWorkloadFlow, buildWorkloadPairBreakdown, srcWorkloadKey, dstWorkloadKey, type FlowGraph, type WorkloadPairBreakdown } from './flowGraph'
-import { fmtGB, fmtUSD } from './format'
+import { fmtDuration, fmtGB, fmtUSD } from './format'
 import { nodeMatchesQuery, neighborhoodOf } from './mapSearch'
 import { useHistory } from './useHistory'
 import { useMapData } from './useMapData'
@@ -425,6 +425,11 @@ export default function App() {
           : 'ok'
 
   const status = dataStatusOf(mapData.data, mapData.loading, mapData.error)
+  const windowHours = useMemo(() => {
+    const d = mapData.data
+    if (!d) return null
+    return (new Date(d.range_end_utc).getTime() - new Date(d.range_start_utc).getTime()) / 3600_000
+  }, [mapData.data])
   const observedHours = useMemo(() => {
     const d = mapData.data
     // Unknown until history has loaded: never fall back to the full window length.
@@ -490,7 +495,10 @@ export default function App() {
             <div className="notice notice-warning">
               <strong>Partial window.</strong>
               <span>
-                The collector observed {observedHours !== null ? `${observedHours.toFixed(1)} h` : 'part'} of the selected window. Totals are real but cover less than the full period. Routes are drawn dashed.
+                {windowHours !== null && mapData.data?.unobserved_seconds !== undefined && mapData.data.unobserved_seconds > 0
+                  ? `The collector missed ${fmtDuration(mapData.data.unobserved_seconds)} of this ${fmtDuration(windowHours * 3600)} window (restart or gap).`
+                  : `The collector observed ${observedHours !== null ? `${observedHours.toFixed(1)} h` : 'part'} of the selected window.`}{' '}
+                Totals are real but cover less than the full period. Routes are drawn dashed.
               </span>
             </div>
           )}

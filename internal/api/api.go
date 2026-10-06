@@ -276,7 +276,11 @@ type mapResponse struct {
 	// entries/totals below are real, not fabricated, but do not represent the FULL requested
 	// window — the UI must show this distinction, never silently present a partial number as
 	// if it were the complete period's total.
-	Complete               bool       `json:"complete"`
+	Complete bool `json:"complete"`
+	// UnobservedSeconds is how much of the requested window the collector did not observe
+	// (it was restarting, or history began mid-window). A 40 s restart makes a 24 h window
+	// technically incomplete; this says by how much, so callers can show "23.99 of 24 h".
+	UnobservedSeconds      int        `json:"unobserved_seconds"`
 	PricePerGBUSD          float64    `json:"price_per_gb_usd"`
 	PricePerGBDirectionUSD float64    `json:"price_per_gb_direction_usd"`
 	Entries                []mapEntry `json:"entries"`
@@ -334,7 +338,7 @@ func (h *Handler) Map(w http.ResponseWriter, r *http.Request) {
 	if freshnessTolerance < 60*time.Second {
 		freshnessTolerance = 60 * time.Second
 	}
-	deltas, hasData, complete := h.store.History().EntriesRange(since, now, freshnessTolerance)
+	deltas, hasData, complete, missing := h.store.History().EntriesRangeDetailed(since, now, freshnessTolerance)
 
 	resp := mapResponse{
 		RangeRequested:         rangeParam,
@@ -345,6 +349,7 @@ func (h *Handler) Map(w http.ResponseWriter, r *http.Request) {
 		Region:                 summary.Region,
 		HasData:                hasData,
 		Complete:               complete,
+		UnobservedSeconds:      int(missing.Seconds()),
 		PricePerGBUSD:          summary.EffectivePricePerGB,
 		PricePerGBDirectionUSD: summary.PricePerGBDirection,
 		Entries:                make([]mapEntry, 0, len(deltas)),

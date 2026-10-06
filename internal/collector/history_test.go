@@ -382,3 +382,26 @@ func TestHistory_CompactDownsamplesOldSnapshots(t *testing.T) {
 		t.Fatalf("bucket total %.3f, want %.3f", total, want)
 	}
 }
+
+// QA: a 40-second collector restart marked a whole 24h window "partial", which reads the same as
+// having missed most of the day. The unobserved duration must be reported.
+func TestHistory_EntriesRangeReportsUnobservedDuration(t *testing.T) {
+	h := NewHistory(48)
+	base := mustParse(t, "2026-10-01T00:00:00Z")
+	// Real cadence: a snapshot every 30s for 24h, so a restart gap is the restart's length.
+	n := 24 * 120
+	for i := 0; i <= n; i++ {
+		gb := float64(i) * 10
+		h.Record(base.Add(time.Duration(i)*30*time.Second), gb/10, gb, 0, []costengine.Entry{fakeEntry("a", "b", "w", "d", gb, gb/10)})
+	}
+	h.MarkGap() // collector restarted, back 40s later
+	end := base.Add(24 * time.Hour).Add(40 * time.Second)
+	h.Record(end, 2400, 24000, 0, []costengine.Entry{fakeEntry("a", "b", "w", "d", 24000, 2400)})
+	_, has, complete, missing := h.EntriesRangeDetailed(base, end, time.Hour)
+	if !has || complete {
+		t.Fatalf("window across a restart: has=%v complete=%v, want true,false", has, complete)
+	}
+	if missing < 30*time.Second || missing > time.Minute {
+		t.Errorf("unobserved = %s, want ~40s (not the whole window)", missing)
+	}
+}
