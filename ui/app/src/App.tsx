@@ -187,6 +187,24 @@ export default function App() {
     }
   }, [])
 
+  // The topbar and timebar are both sticky; the filter sidebar must sit below them. Their height
+  // changes with wrapping (narrow windows, long cloud/region names), so measure instead of
+  // hard-coding: a wrong guess left the sidebar overlapping the content (caught in a screenshot).
+  useEffect(() => {
+    const topbar = document.querySelector('.topbar') as HTMLElement | null
+    const timebar = document.querySelector('.timebar') as HTMLElement | null
+    if (!topbar || !timebar) return
+    const apply = () => {
+      document.documentElement.style.setProperty('--topbar-h', `${Math.round(topbar.offsetHeight)}px`)
+      document.documentElement.style.setProperty('--header-h', `${Math.round(topbar.offsetHeight + timebar.offsetHeight)}px`)
+    }
+    apply()
+    const ro = new ResizeObserver(apply)
+    ro.observe(topbar)
+    ro.observe(timebar)
+    return () => ro.disconnect()
+  }, [])
+
   useEffect(() => {
     if (!mapFullscreen) return
     function onKey(e: KeyboardEvent) {
