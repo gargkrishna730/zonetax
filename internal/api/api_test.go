@@ -374,3 +374,24 @@ func TestMap_FreshContinuousCollectionReportsComplete(t *testing.T) {
 		t.Error("Complete = false, want true — a snapshot only ~20s old from a continuously-running collector must not be treated as stale/incomplete")
 	}
 }
+
+// Regression: the collector computed unattributed traffic but the wire struct omitted it, so the
+// API always returned 0. Found live, not by a unit test.
+func TestCosts_ExposesUnattributedGB(t *testing.T) {
+	store := &collector.Store{}
+	store.SetLatestForTest(costengine.Summary{TotalUnattributedGB: 3.5})
+	h := NewHandler(store)
+	rec := httptest.NewRecorder()
+	h.Costs(rec, httptest.NewRequest(http.MethodGet, "/api/v1/costs", nil))
+	var got struct {
+		Totals struct {
+			UnattributedGB float64 `json:"total_unattributed_gb"`
+		} `json:"totals"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Totals.UnattributedGB != 3.5 {
+		t.Errorf("total_unattributed_gb = %v, want 3.5", got.Totals.UnattributedGB)
+	}
+}

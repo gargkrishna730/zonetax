@@ -59,6 +59,10 @@ type totals struct {
 	CrossAZGB  float64 `json:"cross_az_gb"`
 	CrossAZUSD float64 `json:"cross_az_cost_usd"`
 	SameAZGB   float64 `json:"same_az_gb"`
+	// UnattributedGB is traffic seen on the nodes that could not be attributed to two in-cluster
+	// pods (internet, managed services, load balancers, API server). Not costed here, but
+	// reported so the difference against the cloud bill is visible rather than silently missing.
+	UnattributedGB float64 `json:"total_unattributed_gb"`
 	// PricePerGBUSD is the EFFECTIVE $/GB applied to CrossAZUSD — i.e. already includes AWS's
 	// bill-both-directions behavior (see costengine.crossAZBillingMultiplier), so
 	// CrossAZGB * PricePerGBUSD == CrossAZUSD. PricePerGBDirectionUSD is the raw published
@@ -81,6 +85,7 @@ func buildResponse(summary costengine.Summary, updatedAt time.Time, lastErr erro
 			CrossAZGB:              summary.TotalCrossAZGB,
 			CrossAZUSD:             summary.TotalCrossAZCost,
 			SameAZGB:               summary.TotalSameAZGB,
+			UnattributedGB:         summary.TotalUnattributedGB,
 			PricePerGBUSD:          summary.EffectivePricePerGB,
 			PricePerGBDirectionUSD: summary.PricePerGBDirection,
 		},

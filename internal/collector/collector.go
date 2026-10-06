@@ -109,6 +109,10 @@ func (s *Store) setScrapeInterval(d time.Duration) {
 	s.scrapeInterval = d
 }
 
+// SetLatestForTest seeds the Store's latest Summary. Exported for tests in other packages
+// (internal/api); not used in production code paths.
+func (s *Store) SetLatestForTest(summary costengine.Summary) { s.set(summary, nil) }
+
 func (s *Store) set(summary costengine.Summary, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
