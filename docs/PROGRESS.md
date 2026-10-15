@@ -220,3 +220,33 @@ Both set (needed the personal-account token; `gh` defaults to the work account a
 
 M6 was the last open roadmap item, so the roadmap is now empty. Future work should come from real
 usage rather than the original milestone plan.
+
+## 2026-10-15 (later) — v0.7.0 released; fixed stale images in install.yaml
+
+Tagged v0.7.0 so the published chart finally carries the region auto-detection, coverage
+reporting and `/metrics` work. Until this point the published chart was 0.6.1, meaning a fresh
+install anywhere would still have hit the hard-coded-region bug and still shipped the dead
+`alerting.*` values.
+
+Verifying the release surfaced a separate bug in the release pipeline itself. The published
+`install.yaml` had the 0.7.0 manifests but pinned both images to **0.1.0** — `Chart.yaml`'s
+placeholder `appVersion`. The workflow uploaded the committed `install.yaml`, which
+`hack/gen-manifests.sh` generates from that placeholder and which is never re-rendered at the
+tag. So the Helm path got correct images while `kubectl apply -f install.yaml` got images from
+the very first release. That had been true of every release to date.
+
+Fixed by rendering `install.yaml` during the release with the tag's image tags, plus an assertion
+that both images reference the release version so a mismatch fails the release rather than
+publishing manifests pointing at the wrong images. Checked the assertion is not a no-op by
+confirming it rejects the previous broken output.
+
+Re-ran the release workflow against the existing tag (it accepts a `tag` input) rather than
+burning a version number. Verified afterwards:
+
+- Chart 0.7.0 on the Helm repo, with `cloud.*` and `collector.scrapeInterval*` present and
+  `alerting:` gone.
+- Images `0.7.0` exist in GHCR for both components, multi-arch (linux/amd64 + linux/arm64).
+- Published `install.yaml` references `0.7.0` images and includes the new env wiring.
+- Both install paths validate against a live cluster: `helm template` from the published repo
+  renders the right images and honours `--set cloud.region`, and `kubectl apply --dry-run=server`
+  of the published manifest accepts all 7 resources.
