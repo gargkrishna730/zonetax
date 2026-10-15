@@ -108,7 +108,9 @@ Scope: AWS/EKS first. Conntrack-based sampling for MVP (eBPF is a possible v2).
          direction, color scale, line-thickness meaning), and a fullscreen mode (Escape key +
          close button, backdrop, filters/search/focus/positions all carry over since it's the same
          ReactFlow instance reparented, not a second diagram).
-- [ ] **M4** — Alerting: Slack webhook on $/hour threshold breach.
+- [x] **M4** — Monitoring via Prometheus. The collector exposes costed metrics on `/metrics`
+      (`zonetax_cross_az_cost_usd`, per-route breakdown, and coverage signals). A built-in Slack
+      notifier was dropped as a non-goal: see "Non-goals".
 - [x] **M5** — CLI (`zonetax top`, `zonetax report --range 24h`) hitting the collector API,
       released as binaries on tags. Helm repo on GitHub Pages and generated raw manifests
       (`deploy/manifests/install.yaml`) shipped alongside.
@@ -142,7 +144,26 @@ Scope: AWS/EKS first. Conntrack-based sampling for MVP (eBPF is a possible v2).
 
 ## Non-goals (for now)
 
-- Multi-cloud (GCP/Azure) — architecture should stay portable, but AWS is the only implementation.
+- **Other clouds (GCP/Azure) — AWS only.** Deliberate scope, not an oversight:
+  - **Azure has nothing to measure.** Microsoft removed cross-AZ data transfer charges in
+    May 2024, so ZoneTax would report $0.00 there forever.
+  - **GCP bills differently** and would need real work to get right: cross-zone traffic is
+    charged to the sender only (~$0.01/GiB), not to both sides as on AWS, and it is billed per
+    **GiB** rather than per GB. Shipping GCP without making `crossAZBillingMultiplier` and the
+    bytes-per-GB divisor per-cloud would overstate cost by roughly 2x. It also could not be
+    validated the way AWS was — every serious counting bug so far was caught by sending known
+    traffic through a real cluster, not by reading code.
+
+  The architecture stays portable (zones come from standard Kubernetes labels, and the pricing
+  table is already keyed by cloud), so this is revisitable. It just won't be claimed until it
+  can be verified on a real cluster of that cloud.
+- **Built-in alerting/notifiers.** ZoneTax exports costed Prometheus metrics instead
+  (`/metrics` on the collector). A cluster that cares about cost already runs
+  Prometheus/Alertmanager, and reusing it means alert routing, grouping, silencing and
+  escalation all behave the way the team already expects — rather than ZoneTax maintaining its
+  own threshold logic, retry/backoff and webhook secrets. A `zonetax_coverage_complete` gauge is
+  exported specifically so alerts can avoid firing on partially-measured data.
 - Full eBPF — conntrack sampling first; revisit if accuracy/perf demands it.
 - Automated remediation (topology spread, pod affinity) — ZoneTax is observability-first.
 - Long-term cost storage (>7 days) — no bundled TSDB. History is a small file, 7-day retention.
+  Scrape `/metrics` into Prometheus if you want longer retention.

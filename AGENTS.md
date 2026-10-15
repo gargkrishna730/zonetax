@@ -101,8 +101,14 @@ The collector embeds `ui/dist`, so build the UI before building the collector im
   (`internal/clouddetect`), with env override and an honest "unknown" when it can't be
   determined. Also added `coverage` to `/api/v1/costs` (unmeasured nodes were silently invisible)
   and fixed two time-rotted tests that were failing on `main`. See `docs/qa/report-2026-10-15.md`.
-- **Next:** M4 alerting (Slack webhook), eBPF, GCP support (needs per-cloud billing multiplier:
-  GCP bills sender-side only, per GiB — Azure charges nothing cross-AZ since May 2024).
+- **Scope decision (2026-10-15): AWS only, and no built-in alerting.** Azure removed cross-AZ
+  charges in May 2024 (nothing to measure); GCP bills sender-side only, per GiB, so it would need
+  a per-cloud multiplier plus validation on a real GKE cluster before being claimed. Alerting is
+  delegated to Prometheus: the collector now serves costed metrics on `/metrics`
+  (`internal/collectormetrics`), including `zonetax_coverage_complete` so alerts don't fire on
+  partial data. The dead `alerting.*` values (which nothing read) were removed and the README no
+  longer advertises Slack alerts. Both recorded as non-goals in `ROADMAP.md`.
+- **Next:** eBPF (if conntrack accuracy/perf demands it), M6 blog writeup.
 
 ## Memory system (how context survives)
 

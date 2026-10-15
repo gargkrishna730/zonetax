@@ -12,7 +12,7 @@ ZoneTax is a lightweight, Kubernetes-native tool that:
 - 🔍 **Detects** cross-AZ traffic in real time via an in-cluster DaemonSet agent
 - 💰 **Prices it** using a versioned, cloud-specific pricing table (AWS first)
 - 📊 **Visualizes** it as a live flow map — which namespaces/workloads are paying the "zone tax"
-- 🚨 **Alerts** when spend crosses a threshold (Slack webhook)
+- 📈 **Exports Prometheus metrics** (costed, with measurement-coverage signals) so you can alert with the Prometheus/Alertmanager you already run
 - 🖥️ **CLI** for quick `zonetax top` / `zonetax report` checks without opening a dashboard
 
 <picture>
@@ -162,6 +162,40 @@ no spare memory), set `agent.priorityClassName`.
 kubectl -n zonetax port-forward svc/zonetax-collector 8080:8080
 # then open http://localhost:8080
 ```
+
+## Monitoring and alerting
+
+ZoneTax ships no notifier of its own. The collector exposes costed metrics at `/metrics`, so you
+alert with the Prometheus and Alertmanager you already run:
+
+| Metric | Meaning |
+|---|---|
+| `zonetax_cross_az_cost_usd` | Cross-AZ spend for the current window |
+| `zonetax_cross_az_gb` | Volume behind that cost |
+| `zonetax_route_cross_az_cost_usd` | Same, broken down by zone pair and workload pair |
+| `zonetax_unattributed_gb` | Seen but not attributable to two in-cluster pods (not costed) |
+| `zonetax_effective_price_per_gb_usd` | Rate applied, labelled by `cloud` and `region` |
+| `zonetax_nodes_total` / `zonetax_nodes_measured` | How much of the cluster was measured |
+| `zonetax_coverage_complete` | `1` only if every node reported |
+
+The agents separately expose raw byte counters (`zonetax_agent_*_bytes_total`) with no cost math.
+
+```yaml
+# Alert on sustained cross-AZ spend, but only while measurement is complete, so a dead agent
+# can't look like a cost change in either direction.
+- alert: CrossAZSpendHigh
+  expr: zonetax_cross_az_cost_usd > 1 and zonetax_coverage_complete == 1
+  for: 15m
+
+# Separately, tell me when ZoneTax itself has stopped seeing the whole cluster.
+- alert: ZoneTaxCoverageIncomplete
+  expr: zonetax_coverage_complete == 0
+  for: 15m
+```
+
+The second alert matters: cost metrics from a partially-measured cluster understate reality, and
+without it a drop in reported spend is ambiguous. ZoneTax reports missing data as missing rather
+than as `$0`, and these gauges are how that reaches your alerting.
 
 ## CLI
 

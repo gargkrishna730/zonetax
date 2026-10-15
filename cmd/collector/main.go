@@ -12,12 +12,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
 	"github.com/gargkrishna730/zonetax/internal/api"
 	"github.com/gargkrishna730/zonetax/internal/clouddetect"
 	"github.com/gargkrishna730/zonetax/internal/collector"
+	"github.com/gargkrishna730/zonetax/internal/collectormetrics"
 	"github.com/gargkrishna730/zonetax/internal/pricing"
 	"github.com/gargkrishna730/zonetax/ui"
 )
@@ -57,6 +60,8 @@ func main() {
 	// win so operators can still override (e.g. an unusual or unlabelled cluster).
 	cfg.Cloud, cfg.Region = resolveCloudRegion(ctx, clientset)
 
+	collectormetrics.Register(prometheus.DefaultRegisterer)
+
 	store := &collector.Store{}
 	runDone := make(chan struct{})
 	go func() {
@@ -73,6 +78,10 @@ func main() {
 	mux.HandleFunc("/api/v1/top", handler.Top)
 	mux.HandleFunc("/api/v1/history", handler.History)
 	mux.HandleFunc("/api/v1/map", handler.Map)
+	// Costed metrics for Prometheus. ZoneTax deliberately ships no notifier of its own: a cluster
+	// that cares about cost already runs Prometheus/Alertmanager, and reusing it means alert
+	// routing, silencing and escalation all work the way the team already expects.
+	mux.Handle("/metrics", promhttp.Handler())
 	mux.Handle("/", http.FileServer(http.FS(ui.FS())))
 
 	addr := ":8080"

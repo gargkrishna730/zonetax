@@ -16,6 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/gargkrishna730/zonetax/internal/collectormetrics"
 	"github.com/gargkrishna730/zonetax/internal/costengine"
 	"github.com/gargkrishna730/zonetax/internal/pricing"
 	"github.com/gargkrishna730/zonetax/internal/scrape"
@@ -242,6 +243,7 @@ func collectOnce(ctx context.Context, clientset kubernetes.Interface, table *pri
 	}
 
 	store.set(summary, nil)
+	collectormetrics.Update(summary)
 
 	perAgent := make(map[string]costengine.Summary, len(results))
 	for _, r := range results {

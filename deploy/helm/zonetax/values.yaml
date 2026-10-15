@@ -81,7 +81,3 @@ collector:
 serviceAccount:
   create: true
   name: ""
-
-alerting:
-  slackWebhookUrl: ""
-  thresholdUsdPerHour: 5
