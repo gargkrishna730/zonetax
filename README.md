@@ -154,7 +154,8 @@ used, rather than silently claiming a region your cluster isn't in.
 not measured. The `/api/v1/costs` response includes a `coverage` block
 (`nodes_total`, `nodes_measured`, `unmeasured_nodes`, `complete`) so partial measurement is
 visible instead of looking like zero traffic. If an agent can't be scheduled (e.g. a node with
-no spare memory), set `agent.priorityClassName`.
+no spare memory), set `agent.priorityClassName=system-node-critical` so the scheduler can
+preempt a lower-priority pod.
 
 **Open the dashboard:**
 

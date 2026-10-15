@@ -131,10 +131,12 @@ Scope: AWS/EKS, conntrack-based sampling. Both are settled decisions rather than
 - **Same-node pod-to-pod traffic isn't distinguished from same-AZ cross-node traffic** yet; both
   land in the same `same_az_bytes_total` bucket.
 - **A node without a running agent is not measured.** On a memory-constrained node the agent pod
-  can stay Pending indefinitely, and that node's traffic is simply absent from the totals. Set
-  `agent.priorityClassName` (e.g. `system-node-critical`) so the scheduler can make room. Either
-  way this is now reported rather than hidden: `/api/v1/costs` returns a `coverage` block naming
-  unmeasured nodes, and `zonetax_coverage_complete` goes to 0 so alerts can be gated on it.
+  can stay Pending indefinitely, and that node's traffic is simply absent from the totals. Fix:
+  set `agent.priorityClassName` (e.g. `system-node-critical`) so the scheduler can preempt a
+  lower-priority pod — verified on a real cluster where this took coverage from 4/5 nodes to 5/5.
+  Either way the shortfall is reported rather than hidden: `/api/v1/costs` returns a `coverage`
+  block naming unmeasured nodes, and `zonetax_coverage_complete` goes to 0 so alerts can be
+  gated on it.
 - **Attribution is pod-to-pod.** Traffic that isn't between two in-cluster pods (internet,
   managed services, load balancers) is reported as `unattributed_gb` rather than costed, so
   ZoneTax's total reads below the full AWS data-transfer bill by design. See

@@ -176,3 +176,23 @@ Also cleaned up stale framing that no longer matched reality:
 
 Verified: all internal doc links and heading anchors resolve, 14 packages pass `go test -race`,
 no manifest drift. Roadmap is now down to M6 (blog writeup).
+
+## 2026-10-15 (later) — Measurement gap closed on the test cluster
+
+Set `agent.priorityClassName=system-node-critical`. The agent that had been Pending for 8 days
+on a memory-full node now runs, taking coverage from 4/5 to **5/5 nodes** and
+`coverage.complete` from false to true. The `ZoneTaxCoverageIncomplete` alert added earlier the
+same day went from firing to resolved.
+
+Checked the premise before deploying: the node was at 98% memory requests but carried four
+priority-0 pods, so a high-priority agent had something to preempt. The earlier "No preemption
+victims found" event was a consequence of the agent having no priority itself, not of the node
+being genuinely unpreemptable.
+
+Confirmed the new agent measures rather than merely runs: its `/metrics` reports cross-AZ byte
+counters for real flows on that node which had been invisible for 8 days. Counters climbed
+smoothly from the priming baseline with no restart spike across a full DaemonSet replacement,
+and persisted history survived (169 buckets, `history_start` unchanged).
+
+Recorded in the dev values file rather than as a `--set` flag, so the cluster is reproducible
+from the file (verified with `helm get values`).
