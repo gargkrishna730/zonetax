@@ -46,6 +46,10 @@ spec:
                   divisor: "1"
             - name: HISTORY_FILE
               value: /data/history.json.gz
+            - name: SCRAPE_INTERVAL_SECONDS
+              value: {{ .Values.collector.scrapeIntervalSeconds | quote }}
+            - name: SCRAPE_TIMEOUT_SECONDS
+              value: {{ .Values.collector.scrapeTimeoutSeconds | quote }}
             {{- with .Values.cloud.provider }}
             - name: CLOUD_PROVIDER
               value: {{ . | quote }}

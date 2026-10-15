@@ -190,6 +190,10 @@ spec:
                   divisor: "1"
             - name: HISTORY_FILE
               value: /data/history.json.gz
+            - name: SCRAPE_INTERVAL_SECONDS
+              value: "30"
+            - name: SCRAPE_TIMEOUT_SECONDS
+              value: "5"
           ports:
             - containerPort: 8080
               name: http

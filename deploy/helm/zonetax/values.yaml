@@ -50,6 +50,13 @@ collector:
     tag: ""
     pullPolicy: IfNotPresent
   replicas: 1
+  # How often the collector scrapes every agent. This is the data-freshness bound reported as
+  # scrape_interval_seconds in the API. Raising it reduces load on large clusters; lowering it
+  # makes the dashboard more responsive. The agent's own sampling cadence is agent.sampleIntervalSeconds.
+  scrapeIntervalSeconds: 30
+  # Per-agent scrape timeout. Must stay well under scrapeIntervalSeconds. A timeout counts as a
+  # failed scrape and shows up in the API's coverage block, never as zero traffic.
+  scrapeTimeoutSeconds: 5
   # Cost history is saved to /data every 5 minutes and on shutdown, and reloaded on start.
   # Default (persistence.enabled=false): an emptyDir, which survives container crashes and
   # OOM restarts but not pod replacement (rollouts, node moves).
