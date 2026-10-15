@@ -23,7 +23,7 @@
   e.g. AWS us-east-1 cross-AZ = $0.01/GB per direction.
 - Computes $ cost per AZ-pair/namespace/workload over rolling windows.
 - Serves a REST API (`internal/api`) for the UI and CLI.
-- Serves the static UI SPA directly (no separate frontend deployment needed for MVP).
+- Serves the static UI SPA directly (no separate frontend deployment needed).
 
 ### UI (`ui/`)
 - Static single-page app, no build step (plain HTML/CSS/JS + a small charting lib, e.g. D3 or a
@@ -47,16 +47,30 @@ conntrack (per node)
   → UI (Sankey) / CLI (tables)
 ```
 
-## Why conntrack over eBPF for MVP
+## Why conntrack, not eBPF
 
-eBPF (e.g. via Cilium/Hubble or custom programs) gives more accurate, lower-overhead flow capture,
-but requires kernel version constraints, more complex build tooling (clang/libbpf), and is
-significantly more code to get right. Conntrack sampling via `/proc/net/nf_conntrack` is:
-- Available on any standard Linux node without extra kernel modules in most cases
-- Simple to implement and reason about
-- "Good enough" for cost visibility (we care about aggregate GB, not per-packet precision)
+ZoneTax samples `/proc/net/nf_conntrack` rather than attaching eBPF programs. This is a settled
+decision, not a staging post:
 
-eBPF is a natural v2 once the core cost-visibility concept is validated with real users.
+- **The accuracy argument doesn't apply.** eBPF's main draw is more precise flow capture, but
+  controlled tests put conntrack sampling within 1% of the bytes actually sent (+0.7% upload,
+  +0.4% download, +0.7% through a Service — see [accuracy.md](./accuracy.md)). There is no
+  accuracy gap left to close.
+- **The residual error isn't error.** That ~0.7% is TCP/IP header overhead: conntrack counts
+  bytes on the wire, which is also what AWS bills. eBPF would observe the same wire bytes and
+  produce the same figure.
+- **It would make deployment harder.** The agent already needs `hostNetwork` and a privileged
+  init container, which is the main barrier to adoption in locked-down clusters. eBPF adds
+  kernel-version constraints, `CAP_BPF`/`CAP_SYS_ADMIN`, and clang/libbpf build tooling on top.
+- **It would discard hard-won correctness.** Every serious counting bug found so far
+  (cross-node double counting, uncounted reply-direction traffic, agent-restart spikes) was
+  found and fixed in the conntrack path. Rewriting it means re-earning that confidence from
+  scratch.
+
+What actually limits ZoneTax's agreement with the AWS bill is **attribution scope** — it costs
+pod-to-pod traffic, so anything else is reported separately as `unattributed_gb` rather than
+guessed at. eBPF would not change that, because it is a decision about what to attribute, not
+about how to observe packets.
 
 ## Cloud/AZ detection
 

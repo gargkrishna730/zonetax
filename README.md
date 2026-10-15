@@ -10,7 +10,7 @@ hours or days too late to catch the pod that caused it.
 ZoneTax is a lightweight, Kubernetes-native tool that:
 
 - 🔍 **Detects** cross-AZ traffic in real time via an in-cluster DaemonSet agent
-- 💰 **Prices it** using a versioned, cloud-specific pricing table (AWS first)
+- 💰 **Prices it** using a versioned AWS pricing table, billed the way AWS actually bills (both directions)
 - 📊 **Visualizes** it as a live flow map — which namespaces/workloads are paying the "zone tax"
 - 📈 **Exports Prometheus metrics** (costed, with measurement-coverage signals) so you can alert with the Prometheus/Alertmanager you already run
 - 🖥️ **CLI** for quick `zonetax top` / `zonetax report` checks without opening a dashboard
@@ -27,7 +27,7 @@ fully keyboard accessible (WCAG 2.2 AA, 0 axe violations).*
 
 ## Status
 
-🚀 [Latest release](https://github.com/gargkrishna730/zonetax/releases/latest). Early stage, AWS/EKS only for now. See [ROADMAP.md](./ROADMAP.md).
+🚀 [Latest release](https://github.com/gargkrishna730/zonetax/releases/latest). Scope is deliberately narrow: **AWS/EKS, cross-AZ pod-to-pod traffic**, measured via conntrack. See [ROADMAP.md](./ROADMAP.md) for what's intentionally out and why.
 
 ## Does ZoneTax cost anything to run?
 

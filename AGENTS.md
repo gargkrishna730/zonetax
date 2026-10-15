@@ -108,7 +108,9 @@ The collector embeds `ui/dist`, so build the UI before building the collector im
   (`internal/collectormetrics`), including `zonetax_coverage_complete` so alerts don't fire on
   partial data. The dead `alerting.*` values (which nothing read) were removed and the README no
   longer advertises Slack alerts. Both recorded as non-goals in `ROADMAP.md`.
-- **Next:** eBPF (if conntrack accuracy/perf demands it), M6 blog writeup.
+- **Next:** M6 blog writeup. Scope is deliberately closed: AWS-only, conntrack (not eBPF), no
+  built-in alerting. All three are recorded as reasoned non-goals in `ROADMAP.md` — don't
+  re-add them without new evidence.
 
 ## Memory system (how context survives)
 

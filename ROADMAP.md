@@ -1,15 +1,16 @@
 # Roadmap
 
-Scope: AWS/EKS first. Conntrack-based sampling for MVP (eBPF is a possible v2).
+Scope: AWS/EKS, conntrack-based sampling. Both are settled decisions rather than staging posts
+— see "Non-goals" for why other clouds and eBPF are out.
 
 - [x] **M0** — Repo scaffold, LICENSE, README, architecture doc, Helm chart shell, CI skeleton
 - [x] **M1** — Agent captures conntrack flows, maps IP→pod→node→AZ via k8s informer + node labels,
       exposes raw byte-count metrics (Prometheus format). Unit tested (conntrack parser, pod/node
-      index incl. fake-clientset informer test, aggregator, metrics registration); accuracy
-      validation against a real multi-AZ cluster is still pending — see "Known limitations" below.
+      index incl. fake-clientset informer test, aggregator, metrics registration) and validated
+      against a real multi-AZ cluster with known traffic — see [docs/accuracy.md](./docs/accuracy.md).
 - [x] **M2** — Cost engine: versioned AWS pricing table (YAML), collector aggregates AZ-pair bytes
       into $ cost, REST API to query current/historical spend. Deployed and validated live against
-      a test EKS cluster — see "Known limitations" below.
+      a real 3-AZ EKS cluster.
 - [x] **M3** — UI: interactive zone-to-zone traffic map + top-offenders table (namespace/workload
       breakdown). Served by the collector via Go embed.FS at "/", polling /api/v1/costs +
       /api/v1/top every 10s. Iterated five times on real user feedback against the live
@@ -119,17 +120,8 @@ Scope: AWS/EKS first. Conntrack-based sampling for MVP (eBPF is a possible v2).
 - [ ] **M6** — Polish: blog writeup.
       Done already: multi-arch CI images, demo GIF, CONTRIBUTING.md, Helm repo publishing.
 
-## Known limitations (post-M1)
+## Known limitations
 
-- **Validated against a live multi-AZ cluster (test environment, 2026-09-02).** Deployed via Helm to a
-  real 3-AZ EKS cluster; confirmed real cross-AZ byte counts attributed correctly to actual
-  workloads (e.g. a backend API workload us-east-1c -> us-east-1a). Two real issues were
-  found and fixed during validation, both now baked into the Helm chart:
-  1. `net.netfilter.nf_conntrack_acct` was disabled by default on nodes (EKS AL2023), so byte
-     counts came back as 0 — fixed with a privileged init container that sets the sysctl
-     (`agent.enableConntrackAcct`, default true).
-  2. The distroless nonroot container couldn't read `/proc/net/nf_conntrack` even with
-     NET_ADMIN — fixed by running the agent container as `runAsUser: 0`.
 - **hostNetwork + privileged init container required.** The agent runs with `hostNetwork: true`
   and (by default) a privileged init container to flip the conntrack-accounting sysctl — real
   security review implications for locked-down/prod clusters. Fine for dev/test; revisit before
@@ -138,11 +130,19 @@ Scope: AWS/EKS first. Conntrack-based sampling for MVP (eBPF is a possible v2).
   not an API lookup — unusual naming conventions could produce a wrong workload label.
 - **Same-node pod-to-pod traffic isn't distinguished from same-AZ cross-node traffic** yet; both
   land in the same `same_az_bytes_total` bucket.
-- **DaemonSet doesn't tolerate node resource pressure well** — on a memory-constrained node in
-  testing, the agent pod stayed Pending indefinitely (expected; not a bug, but worth noting for
-  resource-tight clusters).
+- **A node without a running agent is not measured.** On a memory-constrained node the agent pod
+  can stay Pending indefinitely, and that node's traffic is simply absent from the totals. Set
+  `agent.priorityClassName` (e.g. `system-node-critical`) so the scheduler can make room. Either
+  way this is now reported rather than hidden: `/api/v1/costs` returns a `coverage` block naming
+  unmeasured nodes, and `zonetax_coverage_complete` goes to 0 so alerts can be gated on it.
+- **Attribution is pod-to-pod.** Traffic that isn't between two in-cluster pods (internet,
+  managed services, load balancers) is reported as `unattributed_gb` rather than costed, so
+  ZoneTax's total reads below the full AWS data-transfer bill by design. See
+  [docs/accuracy.md](./docs/accuracy.md).
 
-## Non-goals (for now)
+## Non-goals
+
+These are deliberate scope boundaries, each with a reason. Revisit only with new evidence.
 
 - **Other clouds (GCP/Azure) — AWS only.** Deliberate scope, not an oversight:
   - **Azure has nothing to measure.** Microsoft removed cross-AZ data transfer charges in
@@ -163,7 +163,12 @@ Scope: AWS/EKS first. Conntrack-based sampling for MVP (eBPF is a possible v2).
   escalation all behave the way the team already expects — rather than ZoneTax maintaining its
   own threshold logic, retry/backoff and webhook secrets. A `zonetax_coverage_complete` gauge is
   exported specifically so alerts can avoid firing on partially-measured data.
-- Full eBPF — conntrack sampling first; revisit if accuracy/perf demands it.
+- **eBPF — not planned.** Conntrack sampling already measures within 1% of bytes actually sent,
+  and the residual ~0.7% is TCP/IP header overhead, which is what AWS bills anyway. eBPF would
+  observe the same wire bytes while adding kernel-version constraints, `CAP_BPF`, and
+  clang/libbpf tooling to an agent that already needs `hostNetwork` — and would mean rewriting
+  the one component whose correctness was hardest to earn. See
+  [docs/architecture.md](./docs/architecture.md#why-conntrack-not-ebpf).
 - Automated remediation (topology spread, pod affinity) — ZoneTax is observability-first.
 - Long-term cost storage (>7 days) — no bundled TSDB. History is a small file, 7-day retention.
   Scrape `/metrics` into Prometheus if you want longer retention.

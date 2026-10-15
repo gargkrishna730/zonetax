@@ -24,7 +24,7 @@ timeline
 
 | Decision | Why |
 |---|---|
-| conntrack over eBPF for MVP | Works on any node, simple. eBPF is v2 |
+| conntrack, not eBPF | Measures within 1% of bytes sent; residual is header overhead AWS bills too. eBPF adds kernel/privilege burden for no accuracy gain |
 | Node labels for AZ, not IMDS | No extra IAM, no cloud-specific code |
 | Agent emits raw bytes only, collector prices | Keep agent dumb and fast, one place for pricing |
 | Cross-AZ priced both directions ($0.02/GB effective) | Matches how AWS bills; single-direction was a 2x undercount |
@@ -142,3 +142,37 @@ incomplete, 7-day spend $0.2224 (~$0.032/day). The 2026-10-04 co-location fix ha
 Decision recorded: Azure will not be supported — Microsoft removed cross-AZ transfer charges in
 May 2024, so there is no cost to report. GCP is viable but needs the billing model made
 per-cloud first (sender-side only, billed per GiB, vs AWS both-directions per GB).
+
+## 2026-10-15 (later) — Scope closed: AWS-only, conntrack, no alerting
+
+Three things removed from the roadmap rather than built, each recorded as a reasoned non-goal in
+`ROADMAP.md` so the decision survives rather than getting silently re-added.
+
+**eBPF — dropped.** It was listed as a "possible v2" from the MVP days, but the premise no longer
+holds. eBPF's selling point is accuracy, and conntrack sampling already measures within 1% of
+bytes actually sent. The residual ~0.7% is TCP/IP header overhead, which is what AWS bills
+anyway, so eBPF would observe the same wire bytes and produce the same number. Against zero
+accuracy gain it would add kernel-version constraints, `CAP_BPF` and clang/libbpf tooling to an
+agent that already needs `hostNetwork` (the main adoption barrier), and would mean rewriting the
+one component whose correctness was hardest to earn — every serious counting bug found so far
+lives in that path. What actually limits agreement with the AWS bill is attribution scope
+(pod-to-pod), which eBPF wouldn't change.
+
+**Other clouds and built-in alerting** were already settled earlier today; this pass made the
+wording consistent everywhere.
+
+Also cleaned up stale framing that no longer matched reality:
+- `docs/architecture.md`: "Why conntrack over eBPF for MVP" rewritten as "Why conntrack, not
+  eBPF", citing the measured results instead of "good enough".
+- `ROADMAP.md`: M1 no longer claims accuracy validation is "still pending" (it was done weeks
+  ago); M2's dangling "see Known limitations" pointer removed; "Non-goals (for now)" is now just
+  "Non-goals"; the resolved conntrack-sysctl/distroless findings moved out of Known Limitations
+  since they are fixed and shipped in the chart.
+- Known limitations now reflect today's work: the unmeasured-node entry points at
+  `agent.priorityClassName` and notes that coverage is reported via the API and
+  `zonetax_coverage_complete`, and pod-to-pod attribution is stated as an explicit limitation.
+- `README.md`: dropped "Early stage, AWS/EKS only for now" and "AWS first" in favour of stating
+  the narrow scope deliberately.
+
+Verified: all internal doc links and heading anchors resolve, 14 packages pass `go test -race`,
+no manifest drift. Roadmap is now down to M6 (blog writeup).
