@@ -16,6 +16,14 @@ func mustParse(t *testing.T, s string) time.Time {
 	return tm
 }
 
+// recentBase returns an hour-aligned time hoursAgo hours before now, for tests that exercise
+// Load/save round-trips. Load deliberately drops buckets older than the retention window, so
+// those tests must anchor to the current time — a hard-coded calendar date silently starts
+// failing once it ages past retention (which is exactly what happened before this helper).
+func recentBase(hoursAgo int) time.Time {
+	return time.Now().UTC().Truncate(time.Hour).Add(-time.Duration(hoursAgo) * time.Hour)
+}
+
 func fakeEntry(srcZone, dstZone, srcWorkload, dstWorkload string, gb, cost float64) costengine.Entry {
 	return costengine.Entry{
 		SrcZone: srcZone, DstZone: dstZone,

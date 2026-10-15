@@ -135,6 +135,27 @@ helm install zonetax zonetax/zonetax -n zonetax --create-namespace \
 
 Time the collector was down shows as "no data", never as $0, and is never back-filled.
 
+**Cloud and region** are auto-detected from the cluster's node labels
+(`topology.kubernetes.io/region`) and `spec.providerID`, so there is nothing to configure.
+Override only if your nodes aren't labelled:
+
+```bash
+helm install zonetax zonetax/zonetax -n zonetax --create-namespace \
+  --set cloud.region=us-west-2
+```
+
+If the region can't be determined it is reported as unknown and the cloud-level default rate is
+used, rather than silently claiming a region your cluster isn't in.
+
+> **Azure:** Microsoft removed cross-AZ data transfer charges in May 2024, so there is no
+> cross-zone cost to report there. ZoneTax targets AWS today.
+
+**Measurement coverage:** the agent runs as a DaemonSet, and a node without a running agent is
+not measured. The `/api/v1/costs` response includes a `coverage` block
+(`nodes_total`, `nodes_measured`, `unmeasured_nodes`, `complete`) so partial measurement is
+visible instead of looking like zero traffic. If an agent can't be scheduled (e.g. a node with
+no spare memory), set `agent.priorityClassName`.
+
 **Open the dashboard:**
 
 ```bash

@@ -1,3 +1,18 @@
+# Which cloud and region to price cross-AZ traffic against.
+#
+# Both are auto-detected from the cluster's node labels (topology.kubernetes.io/region) and
+# spec.providerID, so you normally do not need to set either. Set them only to override
+# detection, e.g. on a cluster whose nodes are not labelled.
+#
+# Leaving region empty is safe: the cloud-level default rate is used and the dashboard reports
+# the region as "unknown" rather than claiming a region the cluster isn't in.
+cloud:
+  # "aws" or "gcp". Note: Azure does not charge for cross-AZ data transfer (removed May 2024),
+  # so there is no cross-AZ cost for ZoneTax to report there.
+  provider: ""
+  # e.g. "us-west-2". Empty means auto-detect.
+  region: ""
+
 agent:
   image:
     repository: ghcr.io/gargkrishna730/zonetax-agent

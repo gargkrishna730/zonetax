@@ -126,7 +126,8 @@ func TestHistory_LoadDropsExpiredAndHandlesBadFiles(t *testing.T) {
 // that happened while the collector was down is not dumped into the first hour after restart.
 func TestStore_RestartKeepsHistoryAndMarksDowntime(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "history.json.gz")
-	base := mustParse(t, "2026-10-01T10:00:00Z")
+	// Anchored to now (not a fixed date) so loadHistory's retention window keeps these buckets.
+	base := recentBase(5)
 
 	s1 := &Store{}
 	for i := 0; i <= 120; i++ { // 10:00-12:00, 1 GB/min
@@ -202,7 +203,8 @@ func TestHistory_ConcurrentAccess(t *testing.T) {
 // Downtime that starts mid-hour: that hour keeps its observed data but is partial.
 func TestStore_DowntimeMidHourIsPartial(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "h.gz")
-	base := mustParse(t, "2026-10-01T10:00:00Z")
+	// Anchored to now (not a fixed date) so loadHistory's retention window keeps these buckets.
+	base := recentBase(5)
 	s1 := &Store{}
 	for i := 0; i <= 30; i++ { // 10:00-10:30
 		s1.observe(map[string]costengine.Summary{"a1": agentSum(float64(i))}, base.Add(time.Duration(i)*time.Minute))

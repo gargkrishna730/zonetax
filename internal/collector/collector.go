@@ -8,10 +8,12 @@ import (
 	"context"
 	"errors"
 	"log"
+	"sort"
 	"sync"
 	"time"
 
 	dto "github.com/prometheus/client_model/go"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/gargkrishna730/zonetax/internal/costengine"
@@ -229,6 +231,16 @@ func collectOnce(ctx context.Context, clientset kubernetes.Interface, table *pri
 		return
 	}
 
+	// Record which nodes actually reported, so partial coverage is visible in the API instead
+	// of looking like genuine zero traffic. An agent stuck Pending (e.g. a node with no spare
+	// memory) means that node's traffic is simply not counted.
+	summary.Coverage = computeCoverage(ctx, clientset, targets, results)
+	if !summary.Coverage.Complete() {
+		log.Printf("collector: PARTIAL COVERAGE: %d/%d nodes measured, unmeasured=%v",
+			summary.Coverage.AgentsScraped, summary.Coverage.NodesTotal,
+			summary.Coverage.UnmeasuredNodes)
+	}
+
 	store.set(summary, nil)
 
 	perAgent := make(map[string]costengine.Summary, len(results))
@@ -244,6 +256,43 @@ func collectOnce(ctx context.Context, clientset kubernetes.Interface, table *pri
 
 	log.Printf("collector: cycle complete: %d agents, %d cross-AZ entries, $%.4f total",
 		len(targets), len(summary.Entries), summary.TotalCrossAZCost)
+}
+
+// computeCoverage works out which nodes were actually measured this cycle by comparing the
+// cluster's node list against the agents that successfully returned metrics. Nodes without a
+// reporting agent are named explicitly: their traffic is absent from the totals, and callers
+// must be able to tell that apart from a node that genuinely sent nothing.
+//
+// A failure to list nodes is not fatal — we still report what we scraped, just without a
+// cluster-wide denominator.
+func computeCoverage(ctx context.Context, clientset kubernetes.Interface, targets []scrape.Target, results []scrape.Result) costengine.Coverage {
+	cov := costengine.Coverage{}
+
+	reporting := make(map[string]bool, len(results))
+	for _, r := range results {
+		if r.Err != nil {
+			cov.AgentsFailed++
+			continue
+		}
+		cov.AgentsScraped++
+		if r.Target.NodeName != "" {
+			reporting[r.Target.NodeName] = true
+		}
+	}
+
+	nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Printf("collector: list nodes for coverage: %v", err)
+		return cov
+	}
+	cov.NodesTotal = len(nodes.Items)
+	for i := range nodes.Items {
+		if name := nodes.Items[i].Name; !reporting[name] {
+			cov.UnmeasuredNodes = append(cov.UnmeasuredNodes, name)
+		}
+	}
+	sort.Strings(cov.UnmeasuredNodes)
+	return cov
 }
 
 // mergeScrapeResults logs (without failing the cycle) any per-agent scrape errors and merges

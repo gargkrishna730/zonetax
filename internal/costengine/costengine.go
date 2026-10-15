@@ -65,6 +65,30 @@ type Summary struct {
 	// (internet, managed services, load balancers). Some of it may be billed by the cloud; it is
 	// reported separately rather than guessed at.
 	TotalUnattributedGB float64 `json:"total_unattributed_gb"`
+	// Coverage reports how much of the cluster was actually measured this cycle. A node with no
+	// running agent contributes no traffic, which would otherwise silently look like zero cost
+	// rather than missing data.
+	Coverage Coverage `json:"coverage"`
+}
+
+// Coverage describes how completely this summary observed the cluster. ZoneTax's contract is
+// that missing data is reported as missing, never as $0 and never extrapolated, so the API
+// exposes these counts and the UI can warn when a cluster is only partially measured.
+type Coverage struct {
+	// NodesTotal is how many nodes exist in the cluster.
+	NodesTotal int `json:"nodes_total"`
+	// AgentsScraped is how many agents returned metrics this cycle.
+	AgentsScraped int `json:"agents_scraped"`
+	// AgentsFailed is how many discovered agents could not be scraped.
+	AgentsFailed int `json:"agents_failed"`
+	// UnmeasuredNodes names nodes with no reporting agent (pod Pending, missing, or unscrapable).
+	// Traffic sourced from these nodes is NOT in the totals above.
+	UnmeasuredNodes []string `json:"unmeasured_nodes,omitempty"`
+}
+
+// Complete reports whether every node in the cluster was measured this cycle.
+func (c Coverage) Complete() bool {
+	return c.NodesTotal > 0 && len(c.UnmeasuredNodes) == 0 && c.AgentsFailed == 0
 }
 
 // Compute sums the given cross-AZ and same-AZ metric families (typically merged from multiple

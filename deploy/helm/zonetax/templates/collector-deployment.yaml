@@ -46,6 +46,14 @@ spec:
                   divisor: "1"
             - name: HISTORY_FILE
               value: /data/history.json.gz
+            {{- with .Values.cloud.provider }}
+            - name: CLOUD_PROVIDER
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.cloud.region }}
+            - name: CLOUD_REGION
+              value: {{ . | quote }}
+            {{- end }}
           ports:
             - containerPort: 8080
               name: http

@@ -395,3 +395,64 @@ func TestCosts_ExposesUnattributedGB(t *testing.T) {
 		t.Errorf("total_unattributed_gb = %v, want 3.5", got.Totals.UnattributedGB)
 	}
 }
+
+// Coverage must survive JSON serialization. The API has its own response struct, so a field
+// added to costengine.Summary is NOT automatically exposed — a previous release silently
+// omitted total_unattributed_gb this exact way.
+func TestCosts_ExposesPartialCoverage(t *testing.T) {
+	store := &collector.Store{}
+	store.SetLatestForTest(costengine.Summary{
+		Coverage: costengine.Coverage{
+			NodesTotal:      5,
+			AgentsScraped:   4,
+			UnmeasuredNodes: []string{"node-with-no-agent"},
+		},
+	})
+	h := NewHandler(store)
+	rec := httptest.NewRecorder()
+	h.Costs(rec, httptest.NewRequest(http.MethodGet, "/api/v1/costs", nil))
+
+	var got struct {
+		Coverage struct {
+			NodesTotal      int      `json:"nodes_total"`
+			NodesMeasured   int      `json:"nodes_measured"`
+			Complete        bool     `json:"complete"`
+			UnmeasuredNodes []string `json:"unmeasured_nodes"`
+		} `json:"coverage"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Coverage.NodesTotal != 5 || got.Coverage.NodesMeasured != 4 {
+		t.Errorf("coverage = %+v, want 5 total / 4 measured", got.Coverage)
+	}
+	if got.Coverage.Complete {
+		t.Error("complete = true, want false when a node is unmeasured")
+	}
+	if len(got.Coverage.UnmeasuredNodes) != 1 {
+		t.Errorf("unmeasured_nodes = %v, want 1 entry", got.Coverage.UnmeasuredNodes)
+	}
+}
+
+// Full coverage reports complete=true so the UI shows no warning.
+func TestCosts_CompleteCoverage(t *testing.T) {
+	store := &collector.Store{}
+	store.SetLatestForTest(costengine.Summary{
+		Coverage: costengine.Coverage{NodesTotal: 3, AgentsScraped: 3},
+	})
+	h := NewHandler(store)
+	rec := httptest.NewRecorder()
+	h.Costs(rec, httptest.NewRequest(http.MethodGet, "/api/v1/costs", nil))
+
+	var got struct {
+		Coverage struct {
+			Complete bool `json:"complete"`
+		} `json:"coverage"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Coverage.Complete {
+		t.Error("complete = false, want true when every node reported")
+	}
+}

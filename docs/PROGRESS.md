@@ -105,3 +105,40 @@ good; that claim is corrected in docs/accuracy.md. After the fixes, controlled t
 within 1%. Also: traffic via Services and node IPs is now attributed, unattributed traffic is
 reported instead of silently dropped, partial windows say how much time was missed, the agent
 DaemonSet rollout no longer stalls, and the sticky header no longer overlaps the page.
+
+## 2026-10-15 — Region auto-detection, coverage reporting, data validation
+
+Reported symptom: a `us-west-2` install displayed `us-east-1`.
+
+Root cause: `cmd/collector/main.go` defaulted `Region` to a hard-coded `"us-east-1"`, and
+`CLOUD_REGION` was **never referenced in the Helm chart** — so no Helm install ever set it and
+every deployment reported `us-east-1` regardless of location. Verified on the live collector,
+whose only env vars were `GOMEMLIMIT` and `HISTORY_FILE`.
+
+Dollar amounts were unaffected today (every AWS region in the table is $0.01/GB), but the region
+lookup and the displayed region were wrong, and it would have become a real mispricing bug as
+soon as a differently-priced region was added.
+
+Fixes:
+- `internal/clouddetect`: infer cloud + region from `spec.providerID` and
+  `topology.kubernetes.io/{region,zone}`, with majority voting across nodes. RBAC already
+  allowed node reads. Priority: env override > detection > cloud default with an **empty**
+  region (never a fabricated one).
+- `cloud.provider` / `cloud.region` exposed in `values.yaml`, empty = auto-detect. Default
+  manifests unchanged.
+- `costengine.Coverage` + `coverage` in `/api/v1/costs`: an agent had been Pending 4d5h, leaving
+  1 of 5 nodes unmeasured with no way to tell that from "no traffic". Now reported explicitly
+  and logged as `PARTIAL COVERAGE`.
+- Fixed `TestStore_RestartKeepsHistoryAndMarksDowntime` and `TestStore_DowntimeMidHourIsPartial`,
+  which were already failing on `main`: they anchored to a fixed 2026-10-01 date that had aged
+  out of the 7-day retention window. Now relative to now via `recentBase()`.
+
+Validation (live, 8 days of data): totals arithmetic exact ($0.27596 = 13.798 GB x $0.02),
+169/169 history buckets populated, retention bound honoured, 2 edge buckets correctly flagged
+incomplete, 7-day spend $0.2224 (~$0.032/day). The 2026-10-04 co-location fix has held 11 days.
+`go test -race ./...` green, 82 UI tests pass, no manifest drift. Details in
+`docs/qa/report-2026-10-15.md`.
+
+Decision recorded: Azure will not be supported — Microsoft removed cross-AZ transfer charges in
+May 2024, so there is no cost to report. GCP is viable but needs the billing model made
+per-cloud first (sender-side only, billed per GiB, vs AWS both-directions per GB).

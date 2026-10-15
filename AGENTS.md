@@ -95,7 +95,14 @@ The collector embeds `ui/dist`, so build the UI before building the collector im
 - **v0.4.0 to v0.6.1 (2026-10-06): end-to-end QA found and fixed 10 bugs**, three of them serious
   counting errors. See `docs/qa/report-2026-10-06.md`. Controlled tests now measure within 1% of
   bytes actually sent (upload, download, via Service).
-- **Next:** M4 alerting (Slack webhook), eBPF, multi-cloud.
+- **2026-10-15: region bug + data validation.** `CLOUD_REGION` was hard-coded to `us-east-1` in
+  the collector and **never exposed in the Helm chart**, so every install anywhere reported
+  `us-east-1`. Now auto-detected from node `providerID` + `topology.kubernetes.io/*` labels
+  (`internal/clouddetect`), with env override and an honest "unknown" when it can't be
+  determined. Also added `coverage` to `/api/v1/costs` (unmeasured nodes were silently invisible)
+  and fixed two time-rotted tests that were failing on `main`. See `docs/qa/report-2026-10-15.md`.
+- **Next:** M4 alerting (Slack webhook), eBPF, GCP support (needs per-cloud billing multiplier:
+  GCP bills sender-side only, per GiB — Azure charges nothing cross-AZ since May 2024).
 
 ## Memory system (how context survives)
 

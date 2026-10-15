@@ -42,6 +42,19 @@ type costsResponse struct {
 	// Totals/Entries can change, i.e. the real "data freshness" bound (not the UI's own poll
 	// interval, which is a separate, unrelated number).
 	ScrapeIntervalSeconds int `json:"scrape_interval_seconds"`
+	// Coverage states how much of the cluster was actually measured. Without it a cluster with a
+	// dead or unschedulable agent looks identical to one with no cross-AZ traffic, which would
+	// under-report cost silently.
+	Coverage coverage `json:"coverage"`
+}
+
+// coverage mirrors costengine.Coverage for the API surface.
+type coverage struct {
+	NodesTotal      int      `json:"nodes_total"`
+	NodesMeasured   int      `json:"nodes_measured"`
+	AgentsFailed    int      `json:"agents_failed"`
+	Complete        bool     `json:"complete"`
+	UnmeasuredNodes []string `json:"unmeasured_nodes,omitempty"`
 }
 
 type entry struct {
@@ -88,6 +101,13 @@ func buildResponse(summary costengine.Summary, updatedAt time.Time, lastErr erro
 			UnattributedGB:         summary.TotalUnattributedGB,
 			PricePerGBUSD:          summary.EffectivePricePerGB,
 			PricePerGBDirectionUSD: summary.PricePerGBDirection,
+		},
+		Coverage: coverage{
+			NodesTotal:      summary.Coverage.NodesTotal,
+			NodesMeasured:   summary.Coverage.AgentsScraped,
+			AgentsFailed:    summary.Coverage.AgentsFailed,
+			Complete:        summary.Coverage.Complete(),
+			UnmeasuredNodes: summary.Coverage.UnmeasuredNodes,
 		},
 	}
 	if !updatedAt.IsZero() {
