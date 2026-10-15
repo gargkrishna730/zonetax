@@ -53,12 +53,44 @@ jobs:
           helm lint deploy/helm/zonetax
           helm package deploy/helm/zonetax --version "${TAG#v}" --app-version "${TAG#v}" -d dist
 
+      # Re-render install.yaml at the release tag. The committed copy is generated from
+      # Chart.yaml's appVersion, which is a placeholder, so shipping it as-is pinned the
+      # released manifests to stale image tags. Render with the tag so `kubectl apply -f
+      # install.yaml` pulls the images that belong to this release.
+      - name: Render install.yaml at the release version
+        run: |
+          mkdir -p dist
+          {
+            echo "# ZoneTax raw Kubernetes manifests for ${TAG}."
+            echo "# GENERATED during release from deploy/helm/zonetax. Do not edit by hand."
+            echo "# Install: kubectl apply -f install.yaml"
+            echo "---"
+            echo "apiVersion: v1"
+            echo "kind: Namespace"
+            echo "metadata:"
+            echo "  name: zonetax"
+            helm template zonetax deploy/helm/zonetax \
+              --namespace zonetax \
+              --set agent.image.tag="${TAG#v}" \
+              --set collector.image.tag="${TAG#v}"
+          } > dist/install.yaml
+          # Fail the release rather than publish manifests pointing at the wrong images.
+          if ! grep -q "zonetax-collector:${TAG#v}" dist/install.yaml; then
+            echo "install.yaml does not reference the collector image for ${TAG#v}" >&2
+            exit 1
+          fi
+          if ! grep -q "zonetax-agent:${TAG#v}" dist/install.yaml; then
+            echo "install.yaml does not reference the agent image for ${TAG#v}" >&2
+            exit 1
+          fi
+          grep -oE 'ghcr.io/gargkrishna730/zonetax-[a-z]+:[^"]+' dist/install.yaml | sort -u
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --generate-notes --title "$TAG"
-          gh release upload "$TAG" --clobber dist/*.tar.gz dist/*.tgz dist/checksums.txt deploy/manifests/install.yaml
+          gh release upload "$TAG" --clobber dist/*.tar.gz dist/*.tgz dist/checksums.txt dist/install.yaml
 
       - name: Update Helm repo index on gh-pages
         run: |
