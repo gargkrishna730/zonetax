@@ -196,3 +196,27 @@ and persisted history survived (169 buckets, `history_start` unchanged).
 
 Recorded in the dev values file rather than as a `--set` flag, so the cluster is reproducible
 from the file (verified with `helm get values`).
+
+## 2026-10-15 (later) — M6: build writeup. Roadmap empty.
+
+Wrote `docs/blog/building-zonetax.md` (~2,000 words). Led with the failure rather than the
+feature list, because that is the genuinely useful content: the early "within 4% of the AWS bill"
+claim was worthless, since a 2x double-count and a near-total download undercount cancelled out
+on that cluster's traffic mix. A plausible aggregate hid two large opposite errors.
+
+Covers the $2.32/day → $0.03/day win, the three counting bugs and why only known-traffic testing
+caught them, deleting the accuracy claim and replacing it with the honest 45% scope gap, the
+region bug (hard-coded default plus a chart that never set the override), why the us-east-1 test
+cluster made that fix hard to verify honestly, the 8-day silent coverage gap, and the reasoning
+for cutting Azure/GCP/eBPF/Slack alerting.
+
+Fact-checked every number against the repo before committing. Caught two of my own
+overstatements in the draft: "months later" for the region bug (actually 9 days) and "first
+cluster I pointed it at" (not supportable). Both corrected. Verified the install commands against
+the live published Helm repo, and that all doc links and heading anchors resolve.
+
+Also fixed a discoverability gap unrelated to the post: the repo had no topics and no homepage.
+Both set (needed the personal-account token; `gh` defaults to the work account and 404s).
+
+M6 was the last open roadmap item, so the roadmap is now empty. Future work should come from real
+usage rather than the original milestone plan.

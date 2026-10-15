@@ -117,8 +117,8 @@ Scope: AWS/EKS, conntrack-based sampling. Both are settled decisions rather than
       (`deploy/manifests/install.yaml`) shipped alongside.
 - [x] **Persistent history** (v0.2.0) — saved to a file every 5 min + on shutdown, emptyDir by
       default, optional PVC; downtime reported as gaps, never back-filled.
-- [ ] **M6** — Polish: blog writeup.
-      Done already: multi-arch CI images, demo GIF, CONTRIBUTING.md, Helm repo publishing.
+- [x] **M6** — Polish: multi-arch CI images, demo GIF, CONTRIBUTING.md, Helm repo publishing, and
+      the build writeup in [docs/blog/building-zonetax.md](./docs/blog/building-zonetax.md).
 
 ## Known limitations
 

@@ -108,9 +108,12 @@ The collector embeds `ui/dist`, so build the UI before building the collector im
   (`internal/collectormetrics`), including `zonetax_coverage_complete` so alerts don't fire on
   partial data. The dead `alerting.*` values (which nothing read) were removed and the README no
   longer advertises Slack alerts. Both recorded as non-goals in `ROADMAP.md`.
-- **Next:** M6 blog writeup. Scope is deliberately closed: AWS-only, conntrack (not eBPF), no
-  built-in alerting. All three are recorded as reasoned non-goals in `ROADMAP.md` — don't
-  re-add them without new evidence.
+- **M6 done (2026-10-15):** build writeup at `docs/blog/building-zonetax.md` — the honest version
+  (the invalid "within 4%" claim, the three counting bugs, the region bug, why three features were
+  cut). Repo topics + homepage set for discoverability.
+- **Roadmap is now empty.** Scope is deliberately closed: AWS-only, conntrack (not eBPF), no
+  built-in alerting. All three are reasoned non-goals in `ROADMAP.md` — don't re-add without new
+  evidence. Next work should come from real user feedback, not the old roadmap.
 
 ## Memory system (how context survives)
 

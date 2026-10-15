@@ -25,6 +25,8 @@ fully keyboard accessible (WCAG 2.2 AA, 0 axe violations).*
 
 **Accuracy:** controlled tests on a real 3-AZ cluster measure within 1% of the bytes actually sent (upload, download, and through Services). See [docs/accuracy.md](./docs/accuracy.md).
 
+**How it was built** (and the three counting bugs that made an earlier accuracy claim worthless): [docs/blog/building-zonetax.md](./docs/blog/building-zonetax.md).
+
 ## Status
 
 🚀 [Latest release](https://github.com/gargkrishna730/zonetax/releases/latest). Scope is deliberately narrow: **AWS/EKS, cross-AZ pod-to-pod traffic**, measured via conntrack. See [ROADMAP.md](./ROADMAP.md) for what's intentionally out and why.
