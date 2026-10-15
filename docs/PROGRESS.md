@@ -250,3 +250,25 @@ burning a version number. Verified afterwards:
 - Both install paths validate against a live cluster: `helm template` from the published repo
   renders the right images and honours `--set cloud.region`, and `kubectl apply --dry-run=server`
   of the published manifest accepts all 7 resources.
+
+## 2026-10-15 (later) — Chart.yaml version placeholder fixed
+
+`Chart.yaml` still carried `version`/`appVersion` of `0.1.0` from the very first release. The
+release workflow overrides both from the tag, so published artifacts were correct, but these are
+the values a clone-and-install uses — and `appVersion` is the default image tag. So
+`kubectl apply -f deploy/manifests/install.yaml` from a checkout pulled first-release images.
+CI's drift check actively enforced the stale rendering, so it could not be fixed by editing the
+manifest alone.
+
+Both bumped to 0.7.0 and `install.yaml` regenerated, with a comment explaining why the values
+matter despite being overridden at release time.
+
+Added a guard to the release workflow: it now fails if `Chart.yaml`'s version/appVersion don't
+match the tag being released, since a manual bump is exactly the kind of step that gets
+forgotten. Verified the guard's parsing both ways — it allows a matching tag and blocks a
+mismatched one — rather than assuming it works.
+
+Verified after the fix: the committed manifest references 0.7.0 images, both exist in GHCR
+(HTTP 200), all 7 resources pass `kubectl apply --dry-run=server`, the generator is idempotent
+(two runs produce identical output, so CI's drift check stays green), and all three touched YAML
+files parse.

@@ -51,6 +51,17 @@ jobs:
       - name: Package Helm chart (version = tag)
         run: |
           helm lint deploy/helm/zonetax
+          # Chart.yaml's version/appVersion are overridden below, but they are what a
+          # clone-and-install uses (appVersion is the default image tag). If they drift behind
+          # the tag, installing from source silently pulls old images — so fail loudly here
+          # instead of letting the repo and the release disagree.
+          chart_app="$(grep '^appVersion:' deploy/helm/zonetax/Chart.yaml | tr -d '"' | awk '{print $2}')"
+          chart_ver="$(grep '^version:' deploy/helm/zonetax/Chart.yaml | awk '{print $2}')"
+          if [ "$chart_app" != "${TAG#v}" ] || [ "$chart_ver" != "${TAG#v}" ]; then
+            echo "Chart.yaml (version=$chart_ver appVersion=$chart_app) does not match tag ${TAG#v}." >&2
+            echo "Bump both in deploy/helm/zonetax/Chart.yaml, run ./hack/gen-manifests.sh, and commit." >&2
+            exit 1
+          fi
           helm package deploy/helm/zonetax --version "${TAG#v}" --app-version "${TAG#v}" -d dist
 
       # Re-render install.yaml at the release tag. The committed copy is generated from

@@ -2,8 +2,12 @@ apiVersion: v2
 name: zonetax
 description: Real-time cross-AZ Kubernetes network cost visibility (AWS/EKS)
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+# Kept in sync with the latest released tag. The release workflow overrides both with the tag
+# being published (`helm package --version --app-version`), so these values matter only for
+# installs straight from a clone: appVersion is the default image tag, so a stale value here
+# silently pulls old images. Bump both when cutting a release.
+version: 0.7.0
+appVersion: "0.7.0"
 home: https://github.com/gargkrishna730/zonetax
 sources:
   - https://github.com/gargkrishna730/zonetax
