@@ -1,6 +1,42 @@
 apiVersion: v1
 entries:
   zonetax:
+  - annotations:
+      artifacthub.io/category: monitoring-logging
+      artifacthub.io/containsSecurityUpdates: "false"
+      artifacthub.io/crds: '[]'
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |
+        - name: source
+          url: https://github.com/gargkrishna730/zonetax
+        - name: How it was built
+          url: https://github.com/gargkrishna730/zonetax/blob/main/docs/blog/building-zonetax.md
+        - name: Accuracy methodology
+          url: https://github.com/gargkrishna730/zonetax/blob/main/docs/accuracy.md
+      artifacthub.io/prerelease: "false"
+    apiVersion: v2
+    appVersion: 0.7.1
+    created: "2026-10-17T10:57:10.32905579Z"
+    description: Real-time cross-AZ Kubernetes network cost visibility (AWS/EKS)
+    digest: 6f35b6da911c6155053f59a2772fca1a1fbc79da80289b3e7ccb7af3dd00ebe3
+    home: https://github.com/gargkrishna730/zonetax
+    keywords:
+    - kubernetes
+    - finops
+    - cost
+    - networking
+    - aws
+    - eks
+    maintainers:
+    - name: Krishna Garg
+      url: https://github.com/gargkrishna730
+    name: zonetax
+    sources:
+    - https://github.com/gargkrishna730/zonetax
+    type: application
+    urls:
+    - https://github.com/gargkrishna730/zonetax/releases/download/v0.7.1/zonetax-0.7.1.tgz
+    version: 0.7.1
   - apiVersion: v2
     appVersion: 0.7.0
     created: "2026-10-15T08:24:45.370349676Z"
@@ -221,4 +257,4 @@ entries:
     urls:
     - https://github.com/gargkrishna730/zonetax/releases/download/v0.1.0/zonetax-0.1.0.tgz
     version: 0.1.0
-generated: "2026-10-15T08:24:45.369776783Z"
+generated: "2026-10-17T10:57:10.328529573Z"
