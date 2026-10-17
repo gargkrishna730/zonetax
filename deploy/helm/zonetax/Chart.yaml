@@ -6,8 +6,8 @@ type: application
 # being published (`helm package --version --app-version`), so these values matter only for
 # installs straight from a clone: appVersion is the default image tag, so a stale value here
 # silently pulls old images. Bump both when cutting a release.
-version: 0.7.0
-appVersion: "0.7.0"
+version: 0.7.1
+appVersion: "0.7.1"
 home: https://github.com/gargkrishna730/zonetax
 sources:
   - https://github.com/gargkrishna730/zonetax

@@ -113,7 +113,7 @@ spec:
               mountPath: /proc
       containers:
         - name: agent
-          image: "ghcr.io/gargkrishna730/zonetax-agent:0.7.0"
+          image: "ghcr.io/gargkrishna730/zonetax-agent:0.7.1"
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 0
@@ -179,7 +179,7 @@ spec:
         fsGroup: 65532
       containers:
         - name: collector
-          image: "ghcr.io/gargkrishna730/zonetax-collector:0.7.0"
+          image: "ghcr.io/gargkrishna730/zonetax-collector:0.7.1"
           imagePullPolicy: IfNotPresent
           env:
             # Let the Go GC track the container memory limit instead of growing until OOM.
