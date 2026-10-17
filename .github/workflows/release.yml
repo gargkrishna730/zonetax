@@ -123,6 +123,16 @@ jobs:
             helm repo index idx --url "$url"
           fi
           cp idx/index.yaml pages/index.yaml
+          # Ownership claim for Artifact Hub. Having this file at the repo root is what lets the
+          # listing show as a verified publisher rather than an anonymous entry. Written with
+          # printf rather than a heredoc: this block is indented, and a heredoc would carry that
+          # indentation into the file and produce invalid YAML.
+          printf '%s\n' \
+            'repositoryID: 918b5af2-8155-4349-be04-aae9f3622e2d' \
+            'owners:' \
+            '  - name: Krishna Garg' \
+            '    email: gargkrishna730@gmail.com' \
+            > pages/artifacthub-repo.yml
           cat > pages/index.html <<HTML
           <!doctype html><title>ZoneTax Helm repo</title>
           <h1>ZoneTax Helm repository</h1>
@@ -131,6 +141,6 @@ jobs:
           <p><a href="https://github.com/${GITHUB_REPOSITORY}">github.com/${GITHUB_REPOSITORY}</a></p>
           HTML
           cd pages
-          git add index.yaml index.html
+          git add index.yaml index.html artifacthub-repo.yml
           git commit -m "Publish chart ${TAG}"
           git push origin HEAD:gh-pages
