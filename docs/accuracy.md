@@ -26,6 +26,31 @@ plus headers, which is also what AWS bills.
 The same test on v0.3.1 reported 2.16 GB for the upload (double counted) and 0.003 GB for the
 download (reply direction ignored).
 
+## Re-verified with known traffic (v0.7.0, 2026-10-17)
+
+Internal consistency checks (totals matching, no gaps) are necessary but **not sufficient** —
+they all passed in v0.3.x while the counting was 2x wrong. So accuracy was re-confirmed the only
+way that can fail honestly: by sending a known quantity and comparing.
+
+Two pods were scheduled on nodes in different AZs and exactly 1 GiB (1.0737 GB) was transferred:
+
+| Test | Reported | Error |
+|---|---|---|
+| 1 GiB, pod in us-east-1c to pod in us-east-1a | 1.0834 GB | **+0.90%** |
+| Attribution | `us-east-1c -> us-east-1a`, correct namespace/pod both ends | correct |
+| Counted once (not per-node) | single entry of 1.0801 GB, plus 0.0015 GB of return ACKs | correct |
+| 1 GiB same-AZ (control, both pods on one node) | +0.0018 GB cross-AZ, +1.1772 GB same-AZ | correct |
+| Cross-AZ entries naming the same-AZ pod | 0 | correct |
+
+The +0.90% is TCP/IP header overhead, which is what AWS bills too. The same-AZ control is the
+important half: traffic that is not billable must not be costed, and no cross-AZ entry was
+created for it.
+
+This rules out the failure modes that the earlier bugs represented — double counting across
+nodes, ignoring the reply direction, and billing non-billable traffic — and it also rules out
+pod-index resolution having silently degraded, since both endpoints resolved to the correct
+namespace and pod name.
+
 ## Full-day comparison vs the AWS bill (v0.7.0, 2026-10-16 UTC)
 
 The most recent check, on a day where both sides have a complete window and all 5 nodes were

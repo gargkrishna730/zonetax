@@ -304,3 +304,29 @@ is about 7 cents a day.
 Updated `docs/accuracy.md` with the fresh comparison (keeping the older one, labelled), and
 corrected the ~45% figure in the unpublished blog post and HN draft so they don't go out with a
 stale number.
+
+## 2026-10-17 (later) — Re-verified accuracy with known traffic
+
+Asked to confirm the data is correct. The consistency checks earlier today (arithmetic, sums,
+no gaps, metrics matching the API) were all **necessary but not sufficient** — every one of them
+would also have passed in v0.3.x while the counting was 2x wrong. Confirming correctness on that
+basis would have repeated the original "within 4%" mistake.
+
+There was also a specific hole in the morning's reasoning: the claim that the 39% unattributed
+traffic is non-pod traffic would look identical to the pod index silently failing to resolve
+endpoints. Consistency checks cannot tell those apart.
+
+So it was re-verified with a known input. Two pods on nodes in different AZs (one node needed a
+toleration for a `tier=backend` taint), exactly 1 GiB transferred:
+
+- **1.0834 GB reported for 1.0737 GB sent: +0.90%**, consistent with the +0.7% recorded in the
+  v0.4.0 controlled tests. Remaining error is TCP/IP header overhead, which AWS bills too.
+- Attributed to `us-east-1c -> us-east-1a` with the correct namespace and pod at both ends, so
+  pod-index resolution is working, not silently degraded.
+- Counted **once** (1.0801 GB on the forward route plus 0.0015 GB of return ACKs), so the old
+  per-node double counting has not regressed.
+- Same-AZ control: 1 GiB between two pods on one node produced +0.0018 GB cross-AZ and
+  +1.1772 GB same-AZ, with zero cross-AZ entries naming that pod. Non-billable traffic is not
+  being costed.
+
+Test namespace deleted afterwards. Recorded in `docs/accuracy.md`.
