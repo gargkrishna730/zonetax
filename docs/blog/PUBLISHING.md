@@ -1,46 +1,100 @@
-# Publishing the ZoneTax writeup
+# Publishing and visibility
 
-The long-form post is `building-zonetax.md`. This file is the distribution plan: where to post,
-in what order, and the short-form variants each platform actually needs.
+Two different problems, often confused:
 
-## Accounts
+- **Launch spike** — a burst of attention over 2-3 days. Posts do this. Mostly gone within a week.
+- **Sustained discovery** — people finding the project months later because they searched for the
+  problem it solves. Directory listings and search do this.
 
-You need to create these yourself (email verification, ToS acceptance). Most you probably
-already have:
+Do both. The listings matter more over time, and almost nobody bothers with them.
 
-| Platform | Account needed | Notes |
-|---|---|---|
-| dev.to | Yes | Sign in with GitHub, instant |
-| Hacker News | Yes | Karma-free to post; `Show HN` allowed for own projects |
-| r/kubernetes | Yes | Check subreddit self-promo rules first |
-| LinkedIn | Have it | Already linked in CV |
-| Medium | Optional | Skip if you want fewer places to maintain |
+---
+
+# Part 1: Sustained discovery (do this first — it keeps working)
+
+## Artifact Hub (highest value, currently missing)
+
+This is where people search for Kubernetes charts. ZoneTax is **not listed**, which is the
+single biggest discovery gap. It is free, takes one form, and keeps delivering installs
+indefinitely.
+
+1. Sign in at https://artifacthub.io with GitHub
+2. Control Panel → Repositories → Add
+3. Kind: **Helm charts**, Name: `zonetax`, URL: `https://gargkrishna730.github.io/zonetax`
+
+Artifact Hub re-scans periodically, so new releases appear automatically. The chart already
+carries the `artifacthub.io/*` annotations it reads for the listing (license, category, links).
+
+Optional but worth it: claim ownership so the listing shows as verified. Add a
+`artifacthub-repo.yml` file at the root of the `gh-pages` branch containing the repository ID
+Artifact Hub gives you after adding it.
+
+## GitHub topics
+
+Already set: `kubernetes`, `finops`, `aws`, `eks`, `cost-optimization`, `prometheus`,
+`observability`, `golang`, `cloud-cost`, `cross-az`. GitHub's topic pages are browsable, so this
+is passive discovery.
+
+## Awesome lists (PRs, not posts)
+
+Each is a one-time pull request that keeps paying off. Read each list's contribution guide and
+match its existing entry format exactly:
+
+| List | Why it fits |
+|---|---|
+| `awesome-kubernetes` | Large, broadly browsed |
+| `awesome-finops` | Very on-topic, smaller and easier to get merged |
+| `awesome-opencost` / FinOps Foundation resources | Audience is exactly the buyer |
+| `awesome-go` | Needs tests + docs, which this has |
+
+Suggested entry text:
+
+```markdown
+- [ZoneTax](https://github.com/gargkrishna730/zonetax) - Real-time cross-AZ network cost
+  visibility for Kubernetes on AWS. Attributes data-transfer spend to the specific workloads
+  generating it.
+```
+
+## CNCF Landscape
+
+Submit via PR to `cncf/landscape`. Being on the landscape is a credibility signal that outlasts
+any post. Check the current submission requirements first — they ask for a repo that is actively
+maintained with a clear license, both of which apply.
+
+---
+
+# Part 2: Launch spike
+
+Accounts you need to create yourself (email verification, ToS acceptance):
+
+| Platform | Notes |
+|---|---|
+| dev.to | Sign in with GitHub, instant |
+| Hacker News | `Show HN` is allowed for your own project |
+| r/kubernetes, r/devops, r/aws | Check each subreddit's self-promo rules |
+| LinkedIn | Already have it |
 
 ## Canonical URL: set this or you lose the SEO
 
 Post the full article in **one** canonical place, then set `canonical_url` on every copy pointing
 back to it. Without this, Google treats the copies as duplicate content and may rank none of
-them. The GitHub repo is the natural canonical home since it is where the code lives:
+them. The repo is the natural canonical home:
 
 ```
 https://github.com/gargkrishna730/zonetax/blob/main/docs/blog/building-zonetax.md
 ```
 
-If you would rather drive traffic to your portfolio, publish it at
-`gargkrishna730.github.io/blog/building-zonetax` and make that the canonical instead. Pick one
-and use it everywhere.
-
 ## Order matters
 
-Do not blast everywhere at once. Sequence it so early feedback improves the later posts:
+1. **dev.to first.** Low stakes, supports `canonical_url` natively. Watch which sections get
+   quoted — that tells you the real hook.
+2. **r/kubernetes next**, 1-2 days later. Lead with the cost finding, not the tool.
+3. **Hacker News** last, as `Show HN`. Effectively one attempt, so go after the earlier
+   audiences have stress-tested the framing. Tue-Thu, ~8-10am ET.
+4. **LinkedIn** any time — different audience (recruiters, FinOps and platform leads).
 
-1. **dev.to first.** Low-stakes, developer audience, supports `canonical_url` natively. Watch
-   which sections people quote — that tells you the real hook.
-2. **r/kubernetes next**, 1-2 days later. Highly relevant audience. Lead with the cost finding,
-   not the tool.
-3. **Hacker News** last, as `Show HN`. One shot at the front page, so go when the post has
-   already been proofread by the earlier audiences. Post Tue-Thu, ~8-10am ET.
-4. **LinkedIn** any time, different audience entirely (recruiters, FinOps/platform leads).
+Later, as separate posts rather than reruns: **r/aws** (frame it as the data-transfer bill,
+not Kubernetes) and **r/devops** (frame it as the measurement lesson).
 
 ## dev.to front matter
 

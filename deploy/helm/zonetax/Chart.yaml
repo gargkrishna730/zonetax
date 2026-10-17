@@ -18,3 +18,21 @@ keywords:
   - networking
   - aws
   - eks
+maintainers:
+  - name: Krishna Garg
+    url: https://github.com/gargkrishna730
+# Artifact Hub reads these to render the listing. Without them the chart shows up as an
+# unverified entry with no links, which is most of the reason to be listed at all.
+annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/category: monitoring-logging
+  artifacthub.io/links: |
+    - name: source
+      url: https://github.com/gargkrishna730/zonetax
+    - name: How it was built
+      url: https://github.com/gargkrishna730/zonetax/blob/main/docs/blog/building-zonetax.md
+    - name: Accuracy methodology
+      url: https://github.com/gargkrishna730/zonetax/blob/main/docs/accuracy.md
+  artifacthub.io/crds: "[]"
+  artifacthub.io/containsSecurityUpdates: "false"
+  artifacthub.io/prerelease: "false"
