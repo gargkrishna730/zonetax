@@ -26,7 +26,44 @@ plus headers, which is also what AWS bills.
 The same test on v0.3.1 reported 2.16 GB for the upload (double counted) and 0.003 GB for the
 download (reply direction ignored).
 
-## Full-day comparison vs the AWS bill (v0.4.0, 2026-10-05 UTC)
+## Full-day comparison vs the AWS bill (v0.7.0, 2026-10-16 UTC)
+
+The most recent check, on a day where both sides have a complete window and all 5 nodes were
+measured (`coverage.complete = true`):
+
+| | Cross-AZ volume | Cost |
+|---|---|---|
+| AWS Cost Explorer (`EC2: Data Transfer - Inter AZ`) | 10.338 GB billed = **5.169 GB unique** | **$0.1034** |
+| ZoneTax, same UTC day | **1.660 GB** observed | **$0.0332** |
+| Difference | ZoneTax sees 32% of unique GB | **-68%** |
+
+AWS's GB figure counts each unique GB twice because it bills both the sending and receiving
+side; the unique figure is what ZoneTax's one-directional observation is comparable to.
+
+**This gap is scope, not a counting error**, and the tool's own metrics show why. Over the same
+period one agent reported:
+
+| | GB |
+|---|---|
+| Attributed cross-AZ | 0.770 |
+| Attributed same-AZ | 3.459 |
+| **Unattributed** | **2.733** (39% of all bytes it saw) |
+
+Unattributed traffic has one endpoint ZoneTax cannot resolve to an in-cluster pod: managed
+databases, S3 and other AWS services, load balancers, the Kubernetes API server, internet
+egress. Some fraction of it crosses an AZ boundary and is therefore on the bill, but ZoneTax
+reports it separately rather than guessing how much.
+
+Note the gap *widened* from -45% (2026-10-05) to -68% here, and that is the expected direction:
+the large pod-to-pod flow that dominated the earlier measurement was fixed by co-locating the
+workload, so what remains is increasingly traffic ZoneTax is not designed to attribute. The
+absolute difference is about 7 cents a day.
+
+Internal consistency was checked at the same time: the per-route entries sum exactly to the
+reported total (3.4234 GB), `cross_az_gb x effective_price_per_gb` equals the reported cost to
+the cent, and the Prometheus route series count matches the API entry count (54 = 54).
+
+## Earlier full-day comparison (v0.4.0, 2026-10-05 UTC)
 
 | | Cost |
 |---|---|

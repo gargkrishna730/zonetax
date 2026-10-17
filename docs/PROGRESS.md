@@ -272,3 +272,35 @@ Verified after the fix: the committed manifest references 0.7.0 images, both exi
 (HTTP 200), all 7 resources pass `kubectl apply --dry-run=server`, the generator is idempotent
 (two runs produce identical output, so CI's drift check stays green), and all three touched YAML
 files parse.
+
+## 2026-10-17 — Data validation after 2 days unattended
+
+Validated against the live cluster rather than by inspection. All 6 pods up 2 days with zero
+restarts, Helm rev 23.
+
+Healthy:
+- Coverage still **5/5 nodes, complete=true** — the priority-class fix has held.
+- Arithmetic exact: 3.4234 GB x $0.02 = $0.06847, matching the reported total to the cent.
+- Per-route entries sum exactly to the reported total, and the Prometheus route series count
+  matches the API entry count (54 = 54).
+- History: 169/169 buckets with data, no gaps, 7-day retention honoured, rate a consistent
+  $0.0200/GB, ~$0.031/day.
+- No anomalies: top hourly volume 0.084 GB against a 0.069 GB median, zero spikes above 20x
+  median. The restart-priming fix is holding across a 2-day window.
+- 4 incomplete buckets, all correctly explained: the oldest (aging out of the window), two from
+  the v0.7.0 deploy restarts on Oct 15, and the current partial hour.
+
+Compared against the real AWS bill for 2026-10-16 (the last full day complete on both sides):
+AWS billed 10.338 GB = 5.169 GB unique at $0.1034; ZoneTax reported 1.660 GB at $0.0332. That is
+**-68%**, wider than the -45% recorded on 2026-10-05.
+
+Checked whether that was a regression. It is not: the agents' own counters show 39% of all
+observed bytes are unattributed (one endpoint not resolvable to an in-cluster pod), and the
+counting invariants above all hold. The gap widened for the expected reason — the large
+pod-to-pod flow that dominated the earlier comparison was fixed by co-locating the workload, so
+what remains is increasingly traffic ZoneTax is not designed to attribute. Absolute difference
+is about 7 cents a day.
+
+Updated `docs/accuracy.md` with the fresh comparison (keeping the older one, labelled), and
+corrected the ~45% figure in the unpublished blog post and HN draft so they don't go out with a
+stale number.

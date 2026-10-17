@@ -100,15 +100,21 @@ With the counting bugs fixed, controlled tests came in within 1%:
 That residual +0.7% is not error. Conntrack counts bytes on the wire, headers included, which is
 what AWS bills.
 
-But a full-day comparison against the real bill now showed ZoneTax reporting **$0.038 against
-AWS's $0.069** — about 45% low. Having just fixed the counting, I knew it was not a counting
-problem. ZoneTax attributes **pod-to-pod** traffic. Managed databases, S3, load balancers, the
-API server, internet egress: all real cross-AZ bytes, none of them attributable to a pod pair.
+But a full-day comparison against the real bill showed ZoneTax reporting well under what AWS
+charged — about half at the time, and around a third on a more recent day. Having just fixed the
+counting, I knew it was not a counting problem. ZoneTax attributes **pod-to-pod** traffic.
+Managed databases, S3, load balancers, the API server, internet egress: all real cross-AZ bytes,
+none of them attributable to a pod pair. On a recent day its own agents reported that **39% of
+all observed bytes** could not be tied to two in-cluster pods.
+
+The gap has actually *widened* over time, which sounds alarming and isn't. The huge pod-to-pod
+flow that once dominated the measurement is fixed, so what remains is increasingly traffic the
+tool was never designed to attribute. In absolute terms the difference is a few cents a day.
 
 So I replaced "within 4% of the AWS bill" with a correction notice explaining that the original
-claim was invalid, the controlled results, the 45% gap, and why the gap exists. The tool also now
-reports unattributed traffic explicitly in the UI — "N GB outside the cluster, not costed" —
-rather than quietly omitting it.
+claim was invalid, the controlled results, the measured gap against the bill, and why that gap
+exists. The tool also now reports unattributed traffic explicitly in the UI — "N GB outside the
+cluster, not costed" — rather than quietly omitting it.
 
 A tool that tells you it can only see part of the picture is more useful than one that implies it
 sees everything.

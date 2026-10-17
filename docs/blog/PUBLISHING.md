@@ -87,9 +87,10 @@ directions. Only sending a known 1 GiB between two pods found it: it reported 2.
 direction and 0.003 GB the other.
 
 Controlled tests are now within 1%, and the remaining +0.7% is TCP/IP header overhead, which is
-what AWS bills anyway. Against a full day's real bill it reads ~45% low, and that gap is scope
-rather than error: it only attributes pod-to-pod traffic, so managed services, load balancers
-and internet egress are reported separately as unattributed rather than guessed at.
+what AWS bills anyway. Against a full day's real bill it reads substantially low (about a third
+of unique cross-AZ GB on a recent day), and that gap is scope rather than error: it only
+attributes pod-to-pod traffic, so managed services, load balancers and internet egress are
+reported separately as unattributed rather than guessed at — 39% of observed bytes on that day.
 
 Deliberately narrow: AWS only, conntrack not eBPF, no built-in alerting (it exports Prometheus
 metrics instead). Reasons for each are in ROADMAP.md. Azure dropped cross-AZ charges in May
