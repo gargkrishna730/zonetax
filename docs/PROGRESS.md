@@ -330,3 +330,25 @@ toleration for a `tier=backend` taint), exactly 1 GiB transferred:
   being costed.
 
 Test namespace deleted afterwards. Recorded in `docs/accuracy.md`.
+
+## 2026-10-17 (later) — Artifact Hub listing fixed via 0.7.1
+
+The repository was added to Artifact Hub and the package appeared, but the listing was poor:
+no README, license showing as None, category Networking instead of Monitoring, no maintainers,
+and none of the custom links.
+
+Cause: v0.7.0 was tagged *before* the `artifacthub.io/*` annotations were added, so the
+published chart never carried them. Separately, Artifact Hub renders a README from inside the
+chart directory and `deploy/helm/zonetax/README.md` did not exist, which is why the package page
+was largely blank.
+
+Added that chart README (install, what it does, measured accuracy and pod-to-pod scope, the
+values people actually change, an alert example, requirements) and released 0.7.1.
+
+Verified by downloading the published 0.7.1 tarball rather than trusting the release log: it
+contains `zonetax/README.md` (3,960 bytes), `artifacthub.io/license: Apache-2.0`,
+`artifacthub.io/category: monitoring-logging`, and the maintainers block. Both 0.7.1 images are
+in GHCR.
+
+Artifact Hub rescans on its own schedule, so the live listing still showed 0.7.0 immediately
+after release; the corrected metadata is in the chart it will pick up.
