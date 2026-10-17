@@ -352,3 +352,32 @@ in GHCR.
 
 Artifact Hub rescans on its own schedule, so the live listing still showed 0.7.0 immediately
 after release; the corrected metadata is in the chart it will pick up.
+
+## 2026-10-17 (later) — Artifact Hub listing verified; maintainers and ownership fixed
+
+The scheduled recheck confirmed Artifact Hub rescanned and picked up 0.7.1:
+
+| Field | Result |
+|---|---|
+| version | 0.7.1 |
+| license | Apache-2.0 |
+| category | 4 (Monitoring and logging) |
+| readme | 3,960 chars |
+| links | source, How it was built, Accuracy methodology |
+
+One field was still wrong: `maintainers` came back `null`. Comparing against a chart that
+renders maintainers correctly showed why — Artifact Hub keys them by **email** and drops entries
+without one, so the name-plus-url entry was silently ignored. Added the email (already public in
+the README, CV and portfolio).
+
+Also claimed the repository: `artifacthub-repo.yml` is now written to the gh-pages root during
+release, which is what makes the listing show as a verified publisher rather than an anonymous
+entry. Repository ID came from the Artifact Hub API.
+
+Worth noting for future workflow edits: the first attempt wrote that file with a heredoc inside
+an indented workflow block, which carries the indentation into the file. Tested it locally
+before committing and it produced invalid YAML, so it uses `printf` instead. Verified the file
+is live at the Pages URL and parses with the correct ID (the first fetch 404'd purely because
+the Pages build had not finished).
+
+Released as 0.7.2.
