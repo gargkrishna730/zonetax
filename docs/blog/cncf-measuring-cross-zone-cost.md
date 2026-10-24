@@ -97,7 +97,7 @@ On the cluster this work was validated against, one route accounted for 97% of a
 
 Adding a `nodeSelector` to co-locate the collector with its datastore reduced that route's cost from roughly $2.32 per day to $0.03.
 
-The fix is not interesting. The point is that nothing in the cluster had surfaced the problem, and it had been running for months.
+The fix is not interesting. The point is that nothing in the cluster had surfaced the problem, and it only became visible once the traffic was measured and priced.
 
 Two patterns are worth checking in any multi-zone cluster:
 

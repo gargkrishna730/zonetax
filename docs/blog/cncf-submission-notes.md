@@ -68,8 +68,22 @@ The form needs a Google Doc or Word file:
 1. Open a new Google Doc
 2. Paste the markdown from `cncf-measuring-cross-zone-cost.md`
 3. Apply heading styles to the `##` lines and remove the `#` characters
-4. Keep the two code blocks in a monospace font
+4. Keep the three code blocks in a monospace font
 5. Keep the disclaimer and bio as the final two paragraphs
+
+**Watch the YAML block.** Two lines inside it are YAML comments that begin with `#`:
+
+```
+# Only alert on spend while measurement is actually complete.
+# Separately, alert when the measurement itself has gaps.
+```
+
+Google Docs autoformatting can convert a line starting with `#` into a heading. Those two lines
+must stay as plain monospace text inside the code block, otherwise the alert examples become
+unreadable and the document looks careless. Check them after pasting.
+
+The document has: 1 title, 6 section headings, 3 code blocks, no tables, and runs about 1,600
+words (roughly a 6 minute read).
 
 ## Expected timeline
 
