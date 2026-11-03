@@ -88,6 +88,30 @@ Supporting checks over the same run, all against live data:
 Attribution quality in this run: 73.5% of cross-AZ cost was fully pod-to-pod, 26.5% involved the
 node-level fallback for traffic with no pod on one end, consistent with the documented scope.
 
+### Same run, compared against the AWS bill (2026-11-02 UTC)
+
+The known-traffic test above proves counting is right. This compares *coverage* against the bill
+on the most recent day where both sides have a complete window.
+
+| | Cross-AZ volume | Cost |
+|---|---|---|
+| AWS Cost Explorer, this cluster's 5 instances only | 15.352 GB billed = **7.676 GB unique** | **$0.1535** |
+| ZoneTax, same UTC day | **4.060 GB** observed | **$0.0812** |
+| Difference | ZoneTax sees 52.9% of unique GB | **-47.1%** |
+
+Both sides were checked for comparability before computing the ratio:
+
+- ZoneTax: all **24/24** hourly buckets present, none flagged `complete: false` or `has_data:
+  false`, so no partial window is deflating its figure.
+- AWS: all **5/5** cluster instances appear in the resource-level bill. A further 8 non-cluster
+  resources in the same account also billed inter-AZ transfer (4.85 GB) and were excluded, which
+  is why the account-wide figure (20.2 GB) must not be used here.
+
+The error direction is **under-reporting**, which is the safe direction for a cost tool and
+matches the documented scope: ZoneTax attributes pod-to-pod flows and surfaces everything else as
+`unattributed_gb` rather than guessing. Coverage here is *better* than the -68% measured on
+2026-10-16, so the trend is not a regression.
+
 ## Full-day comparison vs the AWS bill (v0.7.0, 2026-10-16 UTC)
 
 The most recent check, on a day where both sides have a complete window and all 5 nodes were

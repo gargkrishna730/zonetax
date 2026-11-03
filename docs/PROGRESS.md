@@ -381,3 +381,42 @@ is live at the Pages URL and parses with the correct ID (the first fetch 404'd p
 the Pages build had not finished).
 
 Released as 0.7.2.
+
+## 2026-11-03 — validation after 19 days unattended
+
+Validated the dev-cluster deployment after it had been running **19.4 days with zero restarts**
+across all six pods, on the principle that consistency checks alone are not evidence (they all
+passed in v0.3.x while the counting was 2x wrong).
+
+Re-ran the only test that can fail honestly: injected exactly 1 GiB between pods in different
+AZs and compared. ZoneTax reported 1.0814 GB, **+0.71%**, attributed to the correct zone pair
+with both endpoints resolved to real pod names and counted once.
+
+The control was made stricter than the v0.7.0 one. Previously both pods sat on a single node; this
+time they were on two *different* nodes in the same zone, so the traffic crossed a host boundary
+without crossing a zone boundary — the case a naive implementation miscounts. It produced **zero**
+cross-AZ entries.
+
+Supporting live checks, all passing: coverage 5/5 with `complete: true`; entry sums equal to
+totals within float precision (2.2e-16) and all 74 entries exact on `gb * 0.02`; **169/169**
+contiguous hourly buckets with no negatives and no spikes (max/mean 1.5x); `/metrics` route count
+equal to API entries (74 = 74) with the series sum matching the total; reported zones matching
+`topology.kubernetes.io/zone` on every node with 0 entries where `src_zone == dst_zone`; all 4
+node-level fallback endpoints naming real nodes in the right zone; counters advancing live; and
+zero error or panic lines in 7 days of logs across all five agents and the collector.
+
+Compared against the AWS bill for 2026-11-02, scoped to the cluster's own 5 instances: AWS billed
+15.352 GB = 7.676 GB unique at $0.1535, ZoneTax reported 4.060 GB at $0.0812, i.e. **-47.1%**.
+Confirmed both sides were comparable first — all 24 hourly buckets present and none flagged
+incomplete, all 5 instances present in the resource-level bill, and 8 non-cluster resources in
+the account that also billed inter-AZ transfer excluded (which is why the account-wide 20.2 GB
+figure must not be used). Coverage is *better* than the -68% seen on 2026-10-16, so the trend is
+not a regression, and the error direction remains under-reporting, which is the safe direction.
+
+Two reporting mistakes of mine worth noting, both caught before they became claims: I first
+looked for `zonetax_route_cross_az_cost_usd_per_hour` and reported 0 route series, which looked
+like a regression but was the wrong metric name; and I read `unattributed_gb` off history buckets
+where that field does not exist, getting a misleading 0.0000 from a `.get()` default.
+
+Test pods and service deleted, port-forward closed, namespace confirmed back to the 6 expected
+pods. Recorded in `docs/accuracy.md`.
