@@ -51,6 +51,43 @@ nodes, ignoring the reply direction, and billing non-billable traffic — and it
 pod-index resolution having silently degraded, since both endpoints resolved to the correct
 namespace and pod name.
 
+## Re-verified after 19 days continuous uptime (v0.7.2, 2026-11-03)
+
+Repeated independently on a 5-node, 3-AZ cluster after the collector had been running
+**19.4 days with zero restarts** across all six pods, to check whether accuracy holds after
+long uptime rather than only on a freshly started deployment.
+
+| Test | Reported | Error |
+|---|---|---|
+| 1 GiB, pod in us-east-1a to pod in us-east-1c | 1.0814 GB | **+0.71%** |
+| Attribution | `us-east-1a -> us-east-1c`, correct namespace/pod both ends | correct |
+| Counted once (not per-node) | single entry of 1.0800 GB, plus 0.0014 GB of return ACKs | correct |
+| 1 GiB same-AZ control (two *different* nodes in us-east-1c) | +0.0072 GB cross-AZ, +1.3294 GB same-AZ | correct |
+| Cross-AZ entries naming the same-AZ pod | 0 | correct |
+
+The control is stronger than the v0.7.0 one: both pods were on **different nodes in the same
+zone**, so the traffic crossed a host boundary without crossing a zone boundary. That is the
+case a naive implementation gets wrong, and it still produced zero cross-AZ entries
+(the $0.00014 residual is unrelated background traffic in the same window).
+
+Supporting checks over the same run, all against live data:
+
+- Coverage 5/5 nodes measured, `complete: true`, 0 agents failed.
+- `sum(entries.cost_usd)` equals `totals.cross_az_cost_usd` to float precision (delta 2.2e-16),
+  and every entry satisfies `gb * 0.02 == cost_usd` exactly (74/74).
+- History returned **169/169 contiguous hourly buckets** over the 7-day window, all gaps exactly
+  1.00 h, timestamps monotonic, **no negative values** (counter-reset bug) and no spikes
+  (max/mean 1.5x).
+- `/metrics` route series count equals API entry count (74 = 74), and the per-route series sum
+  equals the exported total (delta 1.1e-16).
+- Zones reported matched `topology.kubernetes.io/zone` on every node, with **0 entries** where
+  `src_zone == dst_zone`.
+- All node-level fallback endpoints referenced real node names with the correct zone (4/4).
+- Zero error/panic lines in 7 days of logs across all five agents and the collector.
+
+Attribution quality in this run: 73.5% of cross-AZ cost was fully pod-to-pod, 26.5% involved the
+node-level fallback for traffic with no pod on one end, consistent with the documented scope.
+
 ## Full-day comparison vs the AWS bill (v0.7.0, 2026-10-16 UTC)
 
 The most recent check, on a day where both sides have a complete window and all 5 nodes were
