@@ -77,7 +77,8 @@ Supporting checks over the same run, all against live data:
   and every entry satisfies `gb * 0.02 == cost_usd` exactly (74/74).
 - History returned **169/169 contiguous hourly buckets** over the 7-day window, all gaps exactly
   1.00 h, timestamps monotonic, **no negative values** (counter-reset bug) and no spikes
-  (max/mean 1.5x).
+  (max/mean 1.5x on organic traffic; the validation hour itself reads 8.6x, which is the 2 GiB of
+  injected test traffic showing up exactly where it should).
 - `/metrics` route series count equals API entry count (74 = 74), and the per-route series sum
   equals the exported total (delta 1.1e-16).
 - Zones reported matched `topology.kubernetes.io/zone` on every node, with **0 entries** where
