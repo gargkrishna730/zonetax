@@ -107,6 +107,16 @@ Both sides were checked for comparability before computing the ratio:
 - AWS: all **5/5** cluster instances appear in the resource-level bill. A further 8 non-cluster
   resources in the same account also billed inter-AZ transfer (4.85 GB) and were excluded, which
   is why the account-wide figure (20.2 GB) must not be used here.
+- The excluded resources were checked rather than assumed: the 6 EC2 instances among them are all
+  tagged to a *different* EKS cluster, and `describe-instances` filtered on this cluster's tag
+  returns exactly the same 5 IDs that `kubectl get nodes` reports. So no node that was part of the
+  cluster on 2026-11-02 was left out of the AWS side (a terminated node would otherwise bill
+  without appearing in `kubectl` today).
+- All 5 nodes were created well before 2026-11-02, so the node set was stable across the whole
+  comparison window.
+- The two pricing models agree: AWS's own bill works out to exactly $0.01 per billed GB, which is
+  the one-directional half of the $0.02 ZoneTax applies per observed GB. The difference is
+  therefore entirely volume, not rate.
 
 The error direction is **under-reporting**, which is the safe direction for a cost tool and
 matches the documented scope: ZoneTax attributes pod-to-pod flows and surfaces everything else as
