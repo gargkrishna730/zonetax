@@ -88,6 +88,11 @@ OpenCost; it's a companion tool you can run alongside it.
 
 See [docs/architecture.md](./docs/architecture.md) for details.
 
+**🗺️ [Explore the interactive architecture map](https://gargkrishna730.github.io/zonetax/architecture/)**: every
+component, file and API endpoint with a plain-English description, the connections between them,
+and a guided walkthrough of how a packet becomes a dollar figure. Runs in your browser, nothing to
+install. (Generated with [Floorplan](https://github.com/haydenschmitty/floorplan).)
+
 ### How data collection actually works (and why it's not itself a cost problem)
 
 - The **agent** runs as a DaemonSet (one pod per node) and reads `/proc/net/nf_conntrack` —

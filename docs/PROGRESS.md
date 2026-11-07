@@ -420,3 +420,13 @@ where that field does not exist, getting a misleading 0.0000 from a `.get()` def
 
 Test pods and service deleted, port-forward closed, namespace confirmed back to the 6 expected
 pods. Recorded in `docs/accuracy.md`.
+
+## 2026-11-07: Interactive architecture map
+
+Published an interactive architecture map (generated with Floorplan, github.com/haydenschmitty/floorplan)
+at https://gargkrishna730.github.io/zonetax/architecture/ and linked it from the README "How it works"
+section. It lives on the `gh-pages` branch at `architecture/index.html`; the release workflow only
+rewrites its own files there, so releases don't remove it. The local `floorplan/` folder is
+self-gitignored. To refresh after code changes: ask Claude Code to "update the floorplan", then
+`node floorplan/serve.mjs --export <file> --include flows,notes` and copy the file to
+`gh-pages:architecture/index.html`.
