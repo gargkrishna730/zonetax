@@ -51,6 +51,58 @@ nodes, ignoring the reply direction, and billing non-billable traffic — and it
 pod-index resolution having silently degraded, since both endpoints resolved to the correct
 namespace and pod name.
 
+## Re-verified after 36 days continuous uptime (v0.7.2, 2026-11-20)
+
+Third independent run, after **36 days with zero restarts** across all six pods.
+
+| Test | Reported | Error |
+|---|---|---|
+| 1 GiB, pod in us-east-1a to pod in us-east-1c | 1.0799 GB | **+0.58%** |
+| Attribution | `us-east-1a -> us-east-1c`, correct namespace/pod both ends | correct |
+| Counted once (not per-node) | one forward entry of 1.0789 GB, plus 0.0010 GB return ACKs | correct |
+| 1 GiB same-AZ control (two *different* nodes in us-east-1c) | +0.0060 GB cross-AZ, +1.2700 GB same-AZ | correct |
+| Cross-AZ entries naming the same-AZ pod | 0 | correct |
+
+All eleven internal checks passed: coverage 5/5 with `complete: true`; entry sums equal to totals
+within float precision (4.4e-16) and all 78 entries exact on `gb * 0.02`; 169/169 contiguous
+hourly buckets, no negatives, max/mean 1.1x; `/metrics` route count equal to API entries (78 =
+78); zones matching node labels with 0 same-zone entries; zero error lines in 7 days of logs.
+
+One thing worth recording about `/costs`: it is **cumulative since collector start**, so routes
+from the 2026-11-03 validation were still listed 17 days later. They contributed +0.000000 GB to
+this run and are not a leak; a reader comparing runs should expect lifetime totals to retain old
+routes while `/history` ages them out after 7 days.
+
+### Compared against the AWS bill (2026-11-19 UTC)
+
+| | Cross-AZ volume | Cost |
+|---|---|---|
+| AWS Cost Explorer, this cluster's 5 instances only | 22.655 GB billed = **11.327 GB unique** | **$0.2265** |
+| ZoneTax, same UTC day | **4.267 GB** observed | **$0.0853** |
+| Difference | ZoneTax sees 37.7% of unique GB | **-62.3%** |
+
+Denominator validated as before: AWS's tag-filtered instance list matches the kubectl node set
+exactly (5 = 5, no terminated node missed), all nodes predate the window, ZoneTax has 24/24
+complete buckets, and AWS's bill implies exactly $0.01 per billed GB, so the gap is volume rather
+than rate.
+
+**Coverage fell from 52.9% (2026-11-02) to 37.7%, and the cause is on the AWS side, not ours:**
+
+| | 2026-11-02 | 2026-11-19 | Change |
+|---|---|---|---|
+| AWS unique GB | 7.676 | 11.327 | **+47.6%** |
+| ZoneTax GB | 4.060 | 4.267 | +5.1% |
+
+ZoneTax's own measurement is essentially flat while the bill grew by nearly half. The new traffic
+is not pod-to-pod, so it falls outside the documented scope and surfaces as `unattributed_gb`
+rather than being guessed at. Consistent with that, the node-level fallback share of cross-AZ cost
+rose from 26.5% to 36.1% over the same period: more of what crosses a zone boundary now has no pod
+on one end.
+
+This is the known-traffic test earning its keep. A coverage ratio moving from -47% to -62% looks
+alarming in isolation, and without the +0.58% result it would be impossible to tell a scope shift
+from a counting regression.
+
 ## Re-verified after 19 days continuous uptime (v0.7.2, 2026-11-03)
 
 Repeated independently on a 5-node, 3-AZ cluster after the collector had been running
