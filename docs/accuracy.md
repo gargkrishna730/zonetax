@@ -51,6 +51,73 @@ nodes, ignoring the reply direction, and billing non-billable traffic — and it
 pod-index resolution having silently degraded, since both endpoints resolved to the correct
 namespace and pod name.
 
+## Re-verified after 41 days continuous uptime (v0.7.2, 2026-11-25)
+
+Fourth independent run, after **41 days with zero restarts** across all six pods.
+
+| Test | Reported | Error |
+|---|---|---|
+| 1 GiB, pod in us-east-1a to pod in us-east-1c | 1.0807 GB | **+0.65%** |
+| Attribution | `us-east-1a -> us-east-1c`, correct namespace/pod both ends | correct |
+| Counted once (not per-node) | one forward entry of 1.0796 GB, plus 0.0011 GB return ACKs | correct |
+| 1 GiB same-AZ control (two *different* nodes in us-east-1c) | +0.0077 GB cross-AZ, +1.2629 GB same-AZ | correct |
+| Cross-AZ entries naming the same-AZ pod | 0 | correct |
+
+All twelve internal checks passed: coverage 5/5 with `complete: true`; entry sums equal to totals
+within float precision (4.4e-16) and all 106 entries exact on `gb * 0.02`; 169/169 contiguous
+hourly buckets with no negatives; `/metrics` route count equal to API entries (106 = 106) and the
+series sum equal to the exported total; reported zones matching the node labels with 0 entries
+where `src_zone == dst_zone`; zero error lines in 7 days of logs across all six pods.
+
+The one bucket above 3x the mean was 2026-11-20T15:00Z at 7.2x, which is the hour the *previous*
+validation run injected its 2 GiB. Organic traffic over the window is flat (median 0.174 GB/h
+against a 0.174 GB/h mean). Worth stating explicitly because a spike check that cannot
+distinguish injected test traffic from a real anomaly is not a useful check.
+
+### The 2026-11-19 cost spike was transient, and the scope diagnosis held
+
+The previous run recorded coverage falling to 37.7% and attributed it to a burst of non-pod
+traffic rather than a counting regression. Daily figures since then confirm that reading:
+
+| Day (UTC) | AWS unique GB | ZoneTax GB |
+|---|---|---|
+| 2026-11-19 | 11.327 | 4.267 |
+| 2026-11-20 | 17.888 | 5.029 |
+| 2026-11-21 | 4.996 | 3.630 |
+| 2026-11-22 | 5.079 | 3.871 |
+| 2026-11-23 | 5.989 | 4.230 |
+| 2026-11-24 | **5.628** | **4.238** |
+
+The AWS side peaked at 17.9 GB on 2026-11-20 and settled back to roughly 5-6 GB, while ZoneTax
+stayed near 4 GB throughout. Nothing in ZoneTax changed; the burst simply ended.
+
+### Compared against the AWS bill (2026-11-24 UTC)
+
+| | Cross-AZ volume | Cost |
+|---|---|---|
+| AWS Cost Explorer, this cluster's 5 instances only | 11.256 GB billed = **5.628 GB unique** | **$0.1126** |
+| ZoneTax, same UTC day | **4.238 GB** observed | **$0.0848** |
+| Difference | ZoneTax sees 75.3% of unique GB | **-24.7%** |
+
+Denominator validated as in previous runs: AWS's tag-filtered instance list matches the kubectl
+node set exactly (5 = 5), all nodes predate the window, ZoneTax has 24/24 complete buckets, and
+AWS's bill implies exactly $0.01 per billed GB, so the gap is volume rather than rate.
+
+**75.3% is the highest coverage recorded so far**, and it arrived without any code change:
+
+| Run | AWS unique GB | ZoneTax GB | Coverage |
+|---|---|---|---|
+| 2026-10-16 | 5.169 | 1.660 | 32.1% |
+| 2026-11-02 | 7.676 | 4.060 | 52.9% |
+| 2026-11-19 | 11.327 | 4.267 | 37.7% |
+| 2026-11-24 | 5.628 | 4.238 | **75.3%** |
+
+The useful conclusion is that **the coverage ratio is mostly a property of the workload, not of
+ZoneTax**. ZoneTax's own measurement has been stable at roughly 4 GB/day since early November
+while the denominator swung between 5 and 18 GB. Quoting a single coverage percentage as though
+it were a fixed accuracy figure would be misleading in either direction: the honest claim is the
+known-traffic result (within 1%) plus the explicit `unattributed_gb` the tool already reports.
+
 ## Re-verified after 36 days continuous uptime (v0.7.2, 2026-11-20)
 
 Third independent run, after **36 days with zero restarts** across all six pods.
